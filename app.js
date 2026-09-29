@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar, Alert } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale } from './api';
 
@@ -31,11 +31,13 @@ export default function App() {
   const [selectedAuditProd, setSelectedAuditProd] = useState(null);
   const [countedQtyInput, setCountedQtyInput] = useState('');
 
-  // Ingreso / Edición de Producto
+  // Ingreso / Edición de Producto (con Costo y Proveedor)
   const [editingProductId, setEditingProductId] = useState(null);
   const [prodName, setProdName] = useState('');
   const [prodCategory, setProdCategory] = useState('Varios');
+  const [prodCost, setProdCost] = useState('');
   const [prodPrice, setProdPrice] = useState('');
+  const [prodSupplier, setProdSupplier] = useState('');
   const [prodStock, setProdStock] = useState('');
   const [prodUnitType, setProdUnitType] = useState('unid');
   const [prodBarcode, setProdBarcode] = useState('');
@@ -424,7 +426,9 @@ export default function App() {
     setEditingProductId(prod.id);
     setProdName(prod.name);
     setProdCategory(prod.category || 'Varios');
+    setProdCost(prod.cost_price ? String(prod.cost_price) : '0');
     setProdPrice(String(prod.price_per_unit));
+    setProdSupplier(prod.supplier || '');
     setProdStock(String(prod.stock));
     setProdUnitType(prod.unit_type || 'unid');
     setProdBarcode(prod.barcode || '');
@@ -432,17 +436,19 @@ export default function App() {
 
   const handleCancelEditProduct = () => {
     setEditingProductId(null);
-    setProdName(''); setProdPrice(''); setProdStock(''); setProdBarcode(''); setProdUnitType('unid');
+    setProdName(''); setProdCost(''); setProdPrice(''); setProdSupplier(''); setProdStock(''); setProdBarcode(''); setProdUnitType('unid');
   };
 
   const handleSaveProduct = async () => {
-    if (!prodName || !prodPrice || !prodStock) return alert('Completá nombre, precio y stock');
+    if (!prodName || !prodPrice || !prodStock) return alert('Completá nombre, precio de venta y stock');
     try {
       setLoading(true);
       const payload = {
         name: prodName,
         category: prodCategory,
+        cost_price: parseFloat((prodCost || '0').replace(',', '.')),
         price_per_unit: parseFloat(prodPrice.replace(',', '.')),
+        supplier: prodSupplier || null,
         unit_type: prodUnitType,
         stock: parseFloat(prodStock.replace(',', '.')),
         barcode: prodBarcode || null,
@@ -781,7 +787,7 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
           </ScrollView>
         )}
 
-        {/* MÓDULO 3: AUDITORÍA Y CONTROL DE STOCK (A CIEGAS) */}
+        {/* AUDITORÍA Y CONTROL DE STOCK */}
         {currentTab === 'inventario' && (canStock || userRole === 'superadmin') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>📦 Auditoría y Control de Inventario</Text>
@@ -790,7 +796,7 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
             <View style={styles.card}>
               <Text style={styles.subSectionTitle}>👁️ Conteo Físico a Ciegas (Operario)</Text>
               <Text style={{ fontSize: 12, color: '#666', marginBottom: 10 }}>
-                Escanear EAN o buscar el material para ingresar el conteo real contado en la góndola/depósito.
+                Escanear EAN o buscar el material para ingresar el conteo real contado en el depósito/local.
               </Text>
 
               <TouchableOpacity style={styles.buttonCamera} onPress={() => toggleCamera('stock')}>
@@ -845,21 +851,44 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
               )}
             </View>
 
-            {/* TABLA COMPARATIVA TEÓRICO VS REAL (SÓLO VISIBLE PARA SUPERADMIN / DUEÑO) */}
+            {/* TABLA COMPARATIVA CON COSTOS Y MARGEN (SÓLO VISIBLE PARA SUPERADMIN / DUEÑO) */}
             {(userRole === 'superadmin' || userRole === 'dueno') && (
               <View style={{ marginTop: 10 }}>
-                <Text style={styles.subSectionTitle}>📊 Resultados de Auditoría (Sistema vs. Conteo Físico)</Text>
-                {products.map(p => (
-                  <View key={p.id} style={styles.productCard}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontWeight: 'bold', fontSize: 14 }}>{p.name}</Text>
-                      <Text style={{ color: '#666', fontSize: 11 }}>Teórico Sistema: <Text style={{ fontWeight: 'bold', color: '#007bff' }}>{p.stock} {p.unit_type}</Text></Text>
-                      <Text style={{ color: '#666', fontSize: 11 }}>
-                        Último Reporte Físico: {p.last_counted_qty !== null && p.last_counted_qty !== undefined ? <Text style={{ fontWeight: 'bold', color: '#28a745' }}>{p.last_counted_qty} {p.unit_type}</Text> : 'Pendiente'}
-                      </Text>
+                <Text style={styles.subSectionTitle}>📊 Control Financiero y Auditable de Stock</Text>
+                {products.map(p => {
+                  const cost = p.cost_price || 0;
+                  const price = p.price_per_unit || 0;
+                  const margin = price > 0 ? (((price - cost) / price) * 100).toFixed(1) : 0;
+
+                  return (
+                    <View key={p.id} style={styles.productCard}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontWeight: 'bold', fontSize: 15 }}>{p.name}</Text>
+                        <Text style={{ color: '#666', fontSize: 11 }}>Proveedor: <Text style={{ fontWeight: 'bold', color: '#333' }}>{p.supplier || 'Sin especificar'}</Text></Text>
+                        
+                        <View style={{ flexDirection: 'row', marginTop: 4 }}>
+                          <Text style={{ fontSize: 11, color: '#dc3545', fontWeight: 'bold', marginRight: 10 }}>
+                            Costo: ${cost}
+                          </Text>
+                          <Text style={{ fontSize: 11, color: '#28a745', fontWeight: 'bold', marginRight: 10 }}>
+                            PVP: ${price}
+                          </Text>
+                          <Text style={{ fontSize: 11, color: '#6f42c1', fontWeight: 'bold' }}>
+                            Margen: {margin}%
+                          </Text>
+                        </View>
+
+                        <Text style={{ color: '#666', fontSize: 11, marginTop: 4 }}>
+                          Stock Sistema: <Text style={{ fontWeight: 'bold', color: '#007bff' }}>{p.stock} {p.unit_type}</Text> | Conteo Físico: {p.last_counted_qty !== null && p.last_counted_qty !== undefined ? `${p.last_counted_qty} ${p.unit_type}` : 'Pendiente'}
+                        </Text>
+                      </View>
+
+                      <TouchableOpacity style={[styles.buttonPrimary, { padding: 8 }]} onPress={() => { setCurrentTab('ingresos'); handleStartEditProduct(p); }}>
+                        <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>✏️ Ajustar</Text>
+                      </TouchableOpacity>
                     </View>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             )}
           </ScrollView>
@@ -868,14 +897,23 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
         {/* INGRESOS */}
         {currentTab === 'ingresos' && (canIngreso || userRole === 'superadmin' || userRole === 'dueno') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
-            <Text style={styles.sectionTitle}>📥 Ingreso de Materiales y Catálogo</Text>
+            <Text style={styles.sectionTitle}>📥 Ingreso de Materiales y Costos</Text>
             <View style={styles.card}>
               <Text style={styles.subSectionTitle}>
-                {editingProductId ? '✏️ Editar Producto / Cambiar Precio' : '➕ Dar de Alta Nuevo Producto'}
+                {editingProductId ? '✏️ Editar Producto, Costo o Precio' : '➕ Dar de Alta Nuevo Producto'}
               </Text>
+              
               <TextInput style={styles.input} placeholder="Nombre del Producto" value={prodName} onChangeText={setProdName} />
               <TextInput style={styles.input} placeholder="Categoría (ej: Fiambres, Quesos, Miel)" value={prodCategory} onChangeText={setProdCategory} />
               
+              {/* CAMPOS EXCLUSIVOS DE COSTO Y PROVEEDOR */}
+              {(userRole === 'superadmin' || userRole === 'dueno') && (
+                <>
+                  <TextInput style={styles.input} placeholder="Proveedor (ej: Distribuidora Pepito)" value={prodSupplier} onChangeText={setProdSupplier} />
+                  <TextInput style={styles.input} placeholder="Costo de Compra ($) - Confidencial" keyboardType="numeric" value={prodCost} onChangeText={setProdCost} />
+                </>
+              )}
+
               <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#555', marginBottom: 6 }}>Unidad de Medida / Venta:</Text>
               <View style={{ flexDirection: 'row', marginBottom: 12 }}>
                 <TouchableOpacity 
@@ -893,8 +931,8 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
                 </TouchableOpacity>
               </View>
 
-              <TextInput style={styles.input} placeholder={`Precio por ${prodUnitType} ($)`} keyboardType="numeric" value={prodPrice} onChangeText={setProdPrice} />
-              <TextInput style={styles.input} placeholder={`Stock (${prodUnitType})`} keyboardType="numeric" value={prodStock} onChangeText={setProdStock} />
+              <TextInput style={styles.input} placeholder={`Precio de Venta PVP por ${prodUnitType} ($)`} keyboardType="numeric" value={prodPrice} onChangeText={setProdPrice} />
+              <TextInput style={styles.input} placeholder={`Cantidad Ingresada / Stock (${prodUnitType})`} keyboardType="numeric" value={prodStock} onChangeText={setProdStock} />
               
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="Código de Barras / EAN" value={prodBarcode} onChangeText={setProdBarcode} />
@@ -928,7 +966,10 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
                 <View key={p.id} style={styles.productCard}>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontWeight: 'bold', fontSize: 15 }}>{p.name}</Text>
-                    <Text style={{ color: '#28a745', fontWeight: '600' }}>${p.price_per_unit} / {p.unit_type}</Text>
+                    <Text style={{ color: '#28a745', fontWeight: '600' }}>PVP: ${p.price_per_unit} / {p.unit_type}</Text>
+                    {(userRole === 'superadmin' || userRole === 'dueno') && (
+                      <Text style={{ color: '#dc3545', fontSize: 11 }}>Costo: ${p.cost_price || 0} | Proveedor: {p.supplier || 'N/A'}</Text>
+                    )}
                     <Text style={{ color: '#666', fontSize: 12 }}>Stock Actual: {p.stock} {p.unit_type} | EAN: {p.barcode || 'Sin EAN'}</Text>
                   </View>
                   <View style={{ flexDirection: 'row' }}>
