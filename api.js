@@ -71,6 +71,16 @@ export const updateUserPermissions = async (userId, permissions) => {
   return await res.json();
 };
 
+export const submitStockAudit = async (productId, countedQty, reportedBy) => {
+  const res = await fetch(`${API_URL}/products/${productId}/audit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ counted_qty: countedQty, reported_by: reportedBy }),
+  });
+  if (!res.ok) throw new Error("Error al enviar el conteo físico");
+  return await res.json();
+};
+
 export const createPreSale = async (items) => {
   const res = await fetch(`${API_URL}/presales`, {
     method: "POST",
