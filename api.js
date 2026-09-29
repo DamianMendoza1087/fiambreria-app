@@ -1,4 +1,3 @@
-// Mock / Simulador de API Backend
 let mockProducts = [
   { id: 1, name: 'Jamón Cocido', category: 'Fiambres', price_per_unit: 8500, unit_type: 'kg', stock: 10.5, barcode: '7791234567890', is_active: true },
   { id: 2, name: 'Queso Tybo', category: 'Quesos', price_per_unit: 7200, unit_type: 'kg', stock: 15.0, barcode: '7799876543210', is_active: true },
@@ -13,7 +12,8 @@ let mockPreSales = [];
 let nextPreSaleId = 100;
 
 export const loginUser = async (email, password) => {
-  return { id: 1, name: 'Admin Principal', role: 'superadmin', token: 'mock-jwt-token' };
+  const user = mockUsers.find(u => u.email === email) || { id: Date.now(), name: 'Usuario', role: 'cajero', is_cashier_active: true };
+  return { id: user.id, name: user.name, role: user.role, token: 'mock-jwt-token' };
 };
 
 export const fetchProducts = async () => {
@@ -26,7 +26,7 @@ export const createProduct = async (productData) => {
     name: productData.name,
     category: productData.category || 'Varios',
     price_per_unit: parseFloat(productData.price_per_unit),
-    unit_type: productData.unit_type || 'unid', // 'unid' o 'kg'
+    unit_type: productData.unit_type || 'unid',
     stock: parseFloat(productData.stock),
     barcode: productData.barcode || null,
     is_active: true
@@ -83,7 +83,6 @@ export const fetchPendingPreSales = async () => {
 };
 
 export const finalizeSale = async (saleData) => {
-  // Descontar stock de los productos vendidos
   saleData.items.forEach(item => {
     const prodIndex = mockProducts.findIndex(p => p.id === item.product_id);
     if (prodIndex !== -1) {
@@ -91,7 +90,6 @@ export const finalizeSale = async (saleData) => {
     }
   });
 
-  // Si vino de una pre-venta, eliminarla de las pendientes
   if (saleData.presale_id) {
     mockPreSales = mockPreSales.filter(ps => ps.id !== saleData.presale_id);
   }
