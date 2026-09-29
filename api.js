@@ -61,6 +61,16 @@ export const createUser = async (userData) => {
   return await res.json();
 };
 
+export const updateUserStatus = async (userId, userData) => {
+  const res = await fetch(`${API_URL}/users/${userId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(userData),
+  });
+  if (!res.ok) throw new Error("Error al actualizar permisos de usuario");
+  return await res.json();
+};
+
 export const activateCashier = async (userId) => {
   const res = await fetch(`${API_URL}/users/${userId}/activate-cashier`, { method: "PATCH" });
   if (!res.ok) throw new Error("Error al asignar caja");
@@ -80,6 +90,12 @@ export const createPreSale = async (items) => {
 export const fetchPendingPreSales = async () => {
   const res = await fetch(`${API_URL}/presales/pending`);
   if (!res.ok) throw new Error("Error al obtener pre-ventas pendientes");
+  return await res.json();
+};
+
+export const deletePreSale = async (presaleId) => {
+  const res = await fetch(`${API_URL}/presales/${presaleId}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Error al cancelar pre-venta");
   return await res.json();
 };
 
