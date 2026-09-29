@@ -7,21 +7,27 @@ export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userRole, setUserRole] = useState('');
   
-  // Permisos dinámicos del usuario activo
+  // Permisos por módulo
   const [isAccountActive, setIsAccountActive] = useState(false);
   const [canPreventa, setCanPreventa] = useState(true);
   const [canCaja, setCanCaja] = useState(false);
   const [canStock, setCanStock] = useState(false);
+  const [canIngreso, setCanIngreso] = useState(false);
   
   const [currentTab, setCurrentTab] = useState('preventa');
   
-  // Login en blanco
+  // Login
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Inventario & Edición
+  // Productos & Buscadores
   const [products, setProducts] = useState([]);
+  const [searchQueryVendor, setSearchQueryVendor] = useState('');
+  const [searchQueryCashier, setSearchQueryCashier] = useState('');
+  const [searchQueryStock, setSearchQueryStock] = useState('');
+
+  // Ingreso / Edición de Producto
   const [editingProductId, setEditingProductId] = useState(null);
   const [prodName, setProdName] = useState('');
   const [prodCategory, setProdCategory] = useState('Varios');
@@ -36,7 +42,7 @@ export default function App() {
   const [cameraTarget, setCameraTarget] = useState(null);
   const [scanned, setScanned] = useState(false);
 
-  // Pre-venta & Caja
+  // Carritos
   const [vendorCart, setVendorCart] = useState([]);
   const [pendingPreSales, setPendingPreSales] = useState([]);
   const [selectedPreSaleId, setSelectedPreSaleId] = useState(null);
@@ -66,6 +72,7 @@ export default function App() {
         setCanPreventa(currentUser.can_preventa);
         setCanCaja(currentUser.can_caja);
         setCanStock(currentUser.can_stock);
+        setCanIngreso(currentUser.can_ingreso ?? true);
       }
     } catch (e) {
       console.log('Error de sincronización:', e.message);
@@ -97,6 +104,7 @@ export default function App() {
       setCanPreventa(res.can_preventa);
       setCanCaja(res.can_caja);
       setCanStock(res.can_stock);
+      setCanIngreso(res.can_ingreso ?? true);
       
       await loadInitialData();
     } catch (e) {
@@ -109,7 +117,7 @@ export default function App() {
   const handleLogout = () => {
     setIsLoggedIn(false);
     setEmail(''); setPassword(''); setUserRole('');
-    setIsAccountActive(false); setCanPreventa(false); setCanCaja(false); setCanStock(false);
+    setIsAccountActive(false); setCanPreventa(false); setCanCaja(false); setCanStock(false); setCanIngreso(false);
   };
 
   const toggleCamera = async (targetModule) => {
@@ -133,7 +141,7 @@ export default function App() {
     setScanned(true);
     setShowCamera(false);
 
-    if (cameraTarget === 'inventario') {
+    if (cameraTarget === 'ingreso') {
       setProdBarcode(data);
       alert(`✅ Código EAN capturado: ${data}`);
     } else if (cameraTarget === 'preventa') {
@@ -142,7 +150,7 @@ export default function App() {
         addToVendorCart(found);
         alert(`✅ Agregado a Pre-venta: ${found.name}`);
       } else {
-        alert(`⚠️ Código EAN ${data} no encontrado en el catálogo.`);
+        alert(`⚠️ Código EAN ${data} no encontrado.`);
       }
     } else if (cameraTarget === 'caja') {
       const found = products.find(p => p.barcode === data);
@@ -150,13 +158,14 @@ export default function App() {
         addToCashierCart(found);
         alert(`✅ Agregado a Caja: ${found.name}`);
       } else {
-        alert(`⚠️️ Código EAN ${data} no encontrado en el catálogo.`);
+        alert(`⚠️ Código EAN ${data} no encontrado.`);
       }
     }
 
     setTimeout(() => setScanned(false), 2000);
   };
 
+  // Carrito Vendor
   const addToVendorCart = (prod) => {
     const existing = vendorCart.find(i => i.id === prod.id);
     const step = prod.unit_type === 'kg' ? 0.25 : 1;
@@ -172,6 +181,7 @@ export default function App() {
     } else {
       setVendorCart([...vendorCart, { ...prod, qty: step }]);
     }
+    setSearchQueryVendor('');
   };
 
   const updateVendorCartQty = (id, delta) => {
@@ -225,6 +235,7 @@ export default function App() {
     }
   };
 
+  // Carrito Caja
   const handleSelectPreSale = (ps) => {
     setSelectedPreSaleId(ps.id);
     setCashierCart(ps.items.map(i => {
@@ -252,7 +263,7 @@ export default function App() {
       }
       await loadInitialData();
     } catch (e) {
-      alert('Error al cancelar la pre-venta');
+      alert('Error al cancelar pre-venta');
     } finally {
       setLoading(false);
     }
@@ -309,6 +320,7 @@ export default function App() {
     } else {
       setCashierCart([...cashierCart, { ...prod, qty: step, price_per_unit: prod.price_per_unit }]);
     }
+    setSearchQueryCashier('');
   };
 
   const getCashierTotal = () => cashierCart.reduce((acc, i) => acc + (i.price_per_unit * (parseFloat(i.qty) || 0)), 0).toFixed(2);
@@ -411,7 +423,7 @@ export default function App() {
         alert('✅ Producto actualizado correctamente');
       } else {
         await createProduct(payload);
-        alert('✅ Producto guardado en el catálogo');
+        alert('✅ Producto ingresado correctamente');
       }
 
       handleCancelEditProduct();
@@ -458,6 +470,7 @@ export default function App() {
         can_preventa: permKey === 'can_preventa' ? !user.can_preventa : user.can_preventa,
         can_caja: permKey === 'can_caja' ? !user.can_caja : user.can_caja,
         can_stock: permKey === 'can_stock' ? !user.can_stock : user.can_stock,
+        can_ingreso: permKey === 'can_ingreso' ? !user.can_ingreso : (user.can_ingreso ?? false),
       };
       await updateUserPermissions(user.id, updated);
       await loadInitialData();
@@ -498,7 +511,12 @@ export default function App() {
       </SafeAreaView>
     );
   }
-return (
+// Filtros de Búsqueda
+  const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.filter(p => p.name.toLowerCase().includes(searchQueryVendor.toLowerCase()));
+  const filteredProductsCashier = searchQueryCashier.trim() === '' ? [] : products.filter(p => p.name.toLowerCase().includes(searchQueryCashier.toLowerCase()));
+  const filteredProductsStock = products.filter(p => p.name.toLowerCase().includes(searchQueryStock.toLowerCase()) || (p.barcode && p.barcode.includes(searchQueryStock)));
+
+  return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
         <View>
@@ -509,13 +527,13 @@ return (
       </View>
 
       <View style={styles.body}>
-        {/* PRE-VENTA */}
+        {/* MÓDULO 1: PRE-VENTA */}
         {currentTab === 'preventa' && (canPreventa || userRole === 'superadmin') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
-            <Text style={styles.sectionTitle}>🛒 Armar Pre-venta (Mostrador)</Text>
+            <Text style={styles.sectionTitle}>🛒 Pre-venta (Mostrador)</Text>
             
             <TouchableOpacity style={styles.buttonCamera} onPress={() => toggleCamera('preventa')}>
-              <Text style={styles.buttonText}>{showCamera && cameraTarget === 'preventa' ? '📷 Cerrar Escáner EAN' : '📷 Escanear EAN / Código de Barras'}</Text>
+              <Text style={styles.buttonText}>{showCamera && cameraTarget === 'preventa' ? '📷 Cerrar Escáner' : '📷 Escanear EAN con Cámara'}</Text>
             </TouchableOpacity>
 
             {showCamera && cameraTarget === 'preventa' && permission?.granted && (
@@ -524,17 +542,29 @@ return (
               </View>
             )}
 
-            <Text style={styles.subSectionTitle}>Productos Disponibles:</Text>
-            <View style={styles.gridContainer}>
-              {products.map(p => (
-                <TouchableOpacity key={p.id} style={styles.gridCard} onPress={() => addToVendorCart(p)}>
-                  <Text style={styles.gridTitle}>{p.name}</Text>
-                  <Text style={styles.gridPrice}>${p.price_per_unit} / {p.unit_type}</Text>
-                  <Text style={{ fontSize: 11, color: '#666' }}>Stock: {p.stock} {p.unit_type}</Text>
-                  <Text style={styles.gridAdd}>+ Agregar</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            {/* BUSCADOR AUTOCOMPLETAR PRE-VENTA */}
+            <Text style={styles.subSectionTitle}>🔍 Buscar Producto por Nombre / Código:</Text>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Escribí para buscar (ej: ja, queso, salame...)"
+              value={searchQueryVendor}
+              onChangeText={setSearchQueryVendor}
+            />
+
+            {searchQueryVendor.trim() !== '' && (
+              <View style={styles.dropdownContainer}>
+                {filteredProductsVendor.length === 0 ? (
+                  <Text style={{ padding: 10, color: '#888' }}>No se encontraron coincidencias.</Text>
+                ) : (
+                  filteredProductsVendor.map(p => (
+                    <TouchableOpacity key={p.id} style={styles.dropdownItem} onPress={() => addToVendorCart(p)}>
+                      <Text style={{ fontWeight: 'bold' }}>{p.name}</Text>
+                      <Text style={{ color: '#28a745', fontSize: 12 }}>${p.price_per_unit} / {p.unit_type} | Stock: {p.stock} {p.unit_type}</Text>
+                    </TouchableOpacity>
+                  ))
+                )}
+              </View>
+            )}
 
             <Text style={styles.subSectionTitle}>Comanda de Pre-venta:</Text>
             {vendorCart.length === 0 ? <Text style={styles.emptyText}>Sin productos seleccionados</Text> : (
@@ -572,7 +602,7 @@ return (
           </ScrollView>
         )}
 
-        {/* CAJA */}
+        {/* MÓDULO 2: CAJA */}
         {currentTab === 'caja' && (canCaja || userRole === 'superadmin') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>💳 Caja y Cobro</Text>
@@ -606,12 +636,36 @@ return (
             </ScrollView>
 
             <TouchableOpacity style={styles.buttonCamera} onPress={() => toggleCamera('caja')}>
-              <Text style={styles.buttonText}>{showCamera && cameraTarget === 'caja' ? '📷 Cerrar Escáner EAN' : '📷 Agregar Producto con Escáner EAN'}</Text>
+              <Text style={styles.buttonText}>{showCamera && cameraTarget === 'caja' ? '📷 Cerrar Escáner' : '📷 Agregar con Escáner EAN'}</Text>
             </TouchableOpacity>
 
             {showCamera && cameraTarget === 'caja' && permission?.granted && (
               <View style={styles.cameraContainer}>
                 <CameraView style={StyleSheet.absoluteFillObject} facing="back" onBarcodeScanned={scanned ? undefined : handleBarcodeScanned} />
+              </View>
+            )}
+
+            {/* BUSCADOR AUTOCOMPLETAR EN CAJA */}
+            <Text style={styles.subSectionTitle}>🔍 Agregar Producto Adicional:</Text>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Buscar para agregar al ticket..."
+              value={searchQueryCashier}
+              onChangeText={setSearchQueryCashier}
+            />
+
+            {searchQueryCashier.trim() !== '' && (
+              <View style={styles.dropdownContainer}>
+                {filteredProductsCashier.length === 0 ? (
+                  <Text style={{ padding: 10, color: '#888' }}>No se encontraron coincidencias.</Text>
+                ) : (
+                  filteredProductsCashier.map(p => (
+                    <TouchableOpacity key={p.id} style={styles.dropdownItem} onPress={() => addToCashierCart(p)}>
+                      <Text style={{ fontWeight: 'bold' }}>{p.name}</Text>
+                      <Text style={{ color: '#28a745', fontSize: 12 }}>${p.price_per_unit} / {p.unit_type} | Stock: {p.stock} {p.unit_type}</Text>
+                    </TouchableOpacity>
+                  ))
+                )}
               </View>
             )}
 
@@ -699,16 +753,52 @@ return (
           </ScrollView>
         )}
 
-        {/* INVENTARIO */}
+        {/* MÓDULO 3: AUDITORÍA DE INVENTARIO Y VERIFICACIÓN DE STOCK */}
         {currentTab === 'inventario' && (canStock || userRole === 'superadmin') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
-            <Text style={styles.sectionTitle}>📦 Control de Inventario</Text>
+            <Text style={styles.sectionTitle}>📦 Auditoría y Control de Inventario</Text>
+            <Text style={{ fontSize: 13, color: '#666', marginBottom: 10 }}>
+              Módulo exclusivo para consultar stock existente en tiempo real.
+            </Text>
+
+            <TextInput
+              style={styles.searchInput}
+              placeholder="🔍 Filtrar en stock por nombre o código EAN..."
+              value={searchQueryStock}
+              onChangeText={setSearchQueryStock}
+            />
+
+            {filteredProductsStock.length === 0 ? <Text style={styles.emptyText}>No hay productos que coincidan.</Text> : (
+              filteredProductsStock.map(p => (
+                <View key={p.id} style={styles.productCard}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontWeight: 'bold', fontSize: 15 }}>{p.name}</Text>
+                    <Text style={{ color: '#28a745', fontWeight: '600' }}>${p.price_per_unit} / {p.unit_type}</Text>
+                    <Text style={{ color: '#666', fontSize: 12 }}>EAN: {p.barcode || 'Sin EAN'}</Text>
+                  </View>
+
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={{ fontSize: 16, fontWeight: 'bold', color: p.stock <= 2 ? '#dc3545' : '#007bff' }}>
+                      {p.stock} {p.unit_type}
+                    </Text>
+                    {p.stock <= 2 && <Text style={{ color: '#dc3545', fontSize: 10, fontWeight: 'bold' }}>⚠️ Stock Bajo</Text>}
+                  </View>
+                </View>
+              ))
+            )}
+          </ScrollView>
+        )}
+
+        {/* MÓDULO 4: INGRESO DE MATERIALES / CATALOGO */}
+        {currentTab === 'ingresos' && (canIngreso || userRole === 'superadmin' || userRole === 'dueno') && (
+          <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
+            <Text style={styles.sectionTitle}>📥 Ingreso de Materiales y Catálogo</Text>
             <View style={styles.card}>
               <Text style={styles.subSectionTitle}>
-                {editingProductId ? '✏️ Editar Producto' : '➕ Nuevo Producto'}
+                {editingProductId ? '✏️ Editar Producto / Cambiar Precio' : '➕ Dar de Alta Nuevo Producto'}
               </Text>
               <TextInput style={styles.input} placeholder="Nombre del Producto" value={prodName} onChangeText={setProdName} />
-              <TextInput style={styles.input} placeholder="Categoría (ej: Fiambres, Quesos, Cosmética)" value={prodCategory} onChangeText={setProdCategory} />
+              <TextInput style={styles.input} placeholder="Categoría (ej: Fiambres, Quesos, Miel)" value={prodCategory} onChangeText={setProdCategory} />
               
               <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#555', marginBottom: 6 }}>Unidad de Medida / Venta:</Text>
               <View style={{ flexDirection: 'row', marginBottom: 12 }}>
@@ -728,16 +818,16 @@ return (
               </View>
 
               <TextInput style={styles.input} placeholder={`Precio por ${prodUnitType} ($)`} keyboardType="numeric" value={prodPrice} onChangeText={setProdPrice} />
-              <TextInput style={styles.input} placeholder={`Stock Inicial (${prodUnitType})`} keyboardType="numeric" value={prodStock} onChangeText={setProdStock} />
+              <TextInput style={styles.input} placeholder={`Stock (${prodUnitType})`} keyboardType="numeric" value={prodStock} onChangeText={setProdStock} />
               
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="Código de Barras / EAN" value={prodBarcode} onChangeText={setProdBarcode} />
-                <TouchableOpacity style={[styles.buttonCamera, { marginLeft: 8, marginBottom: 0, padding: 12 }]} onPress={() => toggleCamera('inventario')}>
+                <TouchableOpacity style={[styles.buttonCamera, { marginLeft: 8, marginBottom: 0, padding: 12 }]} onPress={() => toggleCamera('ingreso')}>
                   <Text style={styles.buttonText}>📷 Capturar</Text>
                 </TouchableOpacity>
               </View>
 
-              {showCamera && cameraTarget === 'inventario' && permission?.granted && (
+              {showCamera && cameraTarget === 'ingreso' && permission?.granted && (
                 <View style={[styles.cameraContainer, { marginTop: 10 }]}>
                   <CameraView style={StyleSheet.absoluteFillObject} facing="back" onBarcodeScanned={scanned ? undefined : handleBarcodeScanned} />
                 </View>
@@ -745,7 +835,7 @@ return (
 
               <TouchableOpacity style={[styles.buttonPrimary, { marginTop: 15 }]} onPress={handleSaveProduct} disabled={loading}>
                 <Text style={styles.buttonText}>
-                  {editingProductId ? '💾 Guardar Cambios' : '+ Guardar Producto'}
+                  {editingProductId ? '💾 Guardar Cambios' : '+ Guardar / Ingresar Producto'}
                 </Text>
               </TouchableOpacity>
 
@@ -756,21 +846,21 @@ return (
               )}
             </View>
 
-            <Text style={styles.subSectionTitle}>Catálogo Registrado</Text>
-            {products.length === 0 ? <Text style={styles.emptyText}>No hay productos en el inventario.</Text> : (
+            <Text style={styles.subSectionTitle}>Catálogo General Registrado</Text>
+            {products.length === 0 ? <Text style={styles.emptyText}>No hay productos cargados en el sistema.</Text> : (
               products.map(p => (
                 <View key={p.id} style={styles.productCard}>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontWeight: 'bold', fontSize: 15 }}>{p.name}</Text>
                     <Text style={{ color: '#28a745', fontWeight: '600' }}>${p.price_per_unit} / {p.unit_type}</Text>
-                    <Text style={{ color: '#666', fontSize: 12 }}>Stock: {p.stock} {p.unit_type} | EAN: {p.barcode || 'Sin EAN'}</Text>
+                    <Text style={{ color: '#666', fontSize: 12 }}>Stock Actual: {p.stock} {p.unit_type} | EAN: {p.barcode || 'Sin EAN'}</Text>
                   </View>
                   <View style={{ flexDirection: 'row' }}>
                     <TouchableOpacity style={[styles.buttonPrimary, { padding: 8, marginRight: 6 }]} onPress={() => handleStartEditProduct(p)}>
                       <Text style={styles.buttonText}>✏️ Editar</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.buttonDanger} onPress={() => handleDeleteProduct(p.id)}>
-                      <Text style={styles.buttonText}>Eliminar</Text>
+                      <Text style={styles.buttonText}>Borrar</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -779,10 +869,10 @@ return (
           </ScrollView>
         )}
 
-        {/* PANEL DE CONTROL DE PERMISOS GRANULARES (SUPERADMIN / DUEÑO) */}
+        {/* MÓDULO 5: GESTIÓN DE PERMISOS */}
         {currentTab === 'usuarios' && (userRole === 'superadmin' || userRole === 'dueno') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
-            <Text style={styles.sectionTitle}>👥 Gestión de Personal y Permisos</Text>
+            <Text style={styles.sectionTitle}>👥 Personal y Permisos</Text>
             <View style={styles.card}>
               <Text style={styles.subSectionTitle}>Registrar Nuevo Empleado</Text>
               <TextInput style={styles.input} placeholder="Nombre Completo" value={newUserName} onChangeText={setNewUserName} />
@@ -793,7 +883,7 @@ return (
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.subSectionTitle}>Configuración de Módulos por Empleado</Text>
+            <Text style={styles.subSectionTitle}>Configuración Granular de Módulos</Text>
             {usersList.map(u => (
               <View key={u.id} style={[styles.card, { marginBottom: 12 }]}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -817,12 +907,12 @@ return (
                 {u.role !== 'superadmin' && (
                   <View style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 8 }}>
                     <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 6 }}>
-                      Módulos Permitidos:
+                      Habilitar Acceso a Módulos:
                     </Text>
                     
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
                       <TouchableOpacity 
-                        style={[styles.badgeBtn, u.can_preventa && styles.badgeBtnActive]} 
+                        style={[styles.badgeBtn, u.can_preventa && styles.badgeBtnActive, { width: '48%', marginBottom: 6 }]} 
                         onPress={() => handleTogglePermission(u, 'can_preventa')}
                       >
                         <Text style={{ color: u.can_preventa ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>
@@ -831,7 +921,7 @@ return (
                       </TouchableOpacity>
 
                       <TouchableOpacity 
-                        style={[styles.badgeBtn, u.can_caja && styles.badgeBtnActive]} 
+                        style={[styles.badgeBtn, u.can_caja && styles.badgeBtnActive, { width: '48%', marginBottom: 6 }]} 
                         onPress={() => handleTogglePermission(u, 'can_caja')}
                       >
                         <Text style={{ color: u.can_caja ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>
@@ -840,11 +930,20 @@ return (
                       </TouchableOpacity>
 
                       <TouchableOpacity 
-                        style={[styles.badgeBtn, u.can_stock && styles.badgeBtnActive]} 
+                        style={[styles.badgeBtn, u.can_stock && styles.badgeBtnActive, { width: '48%' }]} 
                         onPress={() => handleTogglePermission(u, 'can_stock')}
                       >
                         <Text style={{ color: u.can_stock ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>
-                          📦 Stock {u.can_stock ? '✓' : '✗'}
+                          📦 Inventario {u.can_stock ? '✓' : '✗'}
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity 
+                        style={[styles.badgeBtn, u.can_ingreso && styles.badgeBtnActive, { width: '48%' }]} 
+                        onPress={() => handleTogglePermission(u, 'can_ingreso')}
+                      >
+                        <Text style={{ color: u.can_ingreso ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>
+                          📥 Ingresos {u.can_ingreso ? '✓' : '✗'}
                         </Text>
                       </TouchableOpacity>
                     </View>
@@ -856,11 +955,11 @@ return (
         )}
       </View>
 
-      {/* NAVBAR CON MARGEN INFERIOR PARA BOTONES NATIVOS ANDROID */}
+      {/* NAVBAR */}
       <View style={styles.navbar}>
         {(canPreventa || userRole === 'superadmin') && (
           <TouchableOpacity style={[styles.navBtn, currentTab === 'preventa' && styles.navActive]} onPress={() => handleTabChange('preventa')}>
-            <Text style={styles.navText}>🛒 Pre-venta</Text>
+            <Text style={styles.navText}>🛒 Ventas</Text>
           </TouchableOpacity>
         )}
 
@@ -873,6 +972,12 @@ return (
         {(canStock || userRole === 'superadmin') && (
           <TouchableOpacity style={[styles.navBtn, currentTab === 'inventario' && styles.navActive]} onPress={() => handleTabChange('inventario')}>
             <Text style={styles.navText}>📦 Stock</Text>
+          </TouchableOpacity>
+        )}
+
+        {(canIngreso || userRole === 'superadmin' || userRole === 'dueno') && (
+          <TouchableOpacity style={[styles.navBtn, currentTab === 'ingresos' && styles.navActive]} onPress={() => handleTabChange('ingresos')}>
+            <Text style={styles.navText}>📥 Ingresos</Text>
           </TouchableOpacity>
         )}
 
@@ -892,14 +997,17 @@ const styles = StyleSheet.create({
   headerTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
   body: { flex: 1, backgroundColor: '#f4f6f8' },
   scrollPadding: { padding: 15, paddingBottom: 40 },
-  sectionTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 10 },
-  subSectionTitle: { fontSize: 15, fontWeight: 'bold', marginTop: 15, marginBottom: 8, color: '#444' },
+  sectionTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 10 },
+  subSectionTitle: { fontSize: 14, fontWeight: 'bold', marginTop: 12, marginBottom: 8, color: '#444' },
   input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ddd', padding: 12, borderRadius: 8, marginBottom: 10 },
+  searchInput: { backgroundColor: '#fff', borderWidth: 2, borderColor: '#007bff', padding: 12, borderRadius: 8, fontSize: 15, fontWeight: 'bold' },
+  dropdownContainer: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#007bff', borderRadius: 8, marginTop: 4, marginBottom: 10, maxHeight: 200 },
+  dropdownItem: { padding: 12, borderBottomWidth: 1, borderBottomColor: '#eee' },
   inputHighlight: { backgroundColor: '#fff', borderWidth: 2, borderColor: '#007bff', padding: 12, borderRadius: 8, fontSize: 16, fontWeight: 'bold', color: '#007bff' },
   inputSmall: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ccc', padding: 6, borderRadius: 6, width: 65, textAlign: 'center', fontWeight: 'bold' },
   typeBtn: { flex: 1, padding: 8, borderWidth: 1, borderColor: '#ccc', borderRadius: 8, alignItems: 'center', backgroundColor: '#e9ecef' },
   typeBtnActive: { backgroundColor: '#007bff', borderColor: '#0056b3' },
-  badgeBtn: { flex: 0.31, padding: 8, borderWidth: 1, borderColor: '#ddd', borderRadius: 6, alignItems: 'center', backgroundColor: '#f8f9fa' },
+  badgeBtn: { padding: 8, borderWidth: 1, borderColor: '#ddd', borderRadius: 6, alignItems: 'center', backgroundColor: '#f8f9fa' },
   badgeBtnActive: { backgroundColor: '#28a745', borderColor: '#1e7e34' },
   buttonPrimary: { backgroundColor: '#007bff', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 10 },
   buttonCamera: { backgroundColor: '#6f42c1', padding: 12, borderRadius: 8, alignItems: 'center', marginBottom: 10 },
@@ -907,11 +1015,6 @@ const styles = StyleSheet.create({
   buttonDanger: { backgroundColor: '#dc3545', padding: 8, borderRadius: 6, alignItems: 'center' },
   buttonText: { color: '#fff', fontWeight: 'bold' },
   cameraContainer: { height: 200, borderRadius: 10, overflow: 'hidden', marginBottom: 15 },
-  gridContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-  gridCard: { backgroundColor: '#fff', width: '48%', padding: 10, borderRadius: 8, marginBottom: 8, borderWidth: 1, borderColor: '#ddd' },
-  gridTitle: { fontWeight: 'bold', fontSize: 13 },
-  gridPrice: { color: '#28a745', fontSize: 12 },
-  gridAdd: { color: '#007bff', fontSize: 11, fontWeight: 'bold', marginTop: 4 },
   cartRow: { backgroundColor: '#fff', padding: 10, borderRadius: 8, flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
   totalBox: { backgroundColor: '#fff', padding: 15, borderRadius: 8, flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 2, borderTopColor: '#28a745', marginTop: 10 },
   preSaleBadge: { backgroundColor: '#e9ecef', padding: 12, borderRadius: 8, marginRight: 8, borderWidth: 1, borderColor: '#ccc' },
@@ -934,7 +1037,7 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: Platform.OS === 'android' ? 28 : 12
   },
-  navBtn: { flex: 1, padding: 8, alignItems: 'center' },
+  navBtn: { flex: 1, padding: 6, alignItems: 'center' },
   navActive: { borderTopWidth: 3, borderTopColor: '#007bff' },
-  navText: { color: '#444', fontWeight: 'bold', fontSize: 11 }
+  navText: { color: '#444', fontWeight: 'bold', fontSize: 10 }
 });
