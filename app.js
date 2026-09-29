@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale } from './api';
+import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate } from './api';
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -27,11 +27,11 @@ export default function App() {
   const [searchQueryCashier, setSearchQueryCashier] = useState('');
   const [searchQueryStock, setSearchQueryStock] = useState('');
 
-  // Auditoría a Ciegas
+  // Auditoría a Ciegas de Stock
   const [selectedAuditProd, setSelectedAuditProd] = useState(null);
   const [countedQtyInput, setCountedQtyInput] = useState('');
 
-  // Ingreso / Edición de Producto (con Costo y Proveedor)
+  // Ingreso / Edición de Producto
   const [editingProductId, setEditingProductId] = useState(null);
   const [prodName, setProdName] = useState('');
   const [prodCategory, setProdCategory] = useState('Varios');
@@ -48,7 +48,7 @@ export default function App() {
   const [cameraTarget, setCameraTarget] = useState(null);
   const [scanned, setScanned] = useState(false);
 
-  // Carritos
+  // Carritos & Pre-ventas
   const [vendorCart, setVendorCart] = useState([]);
   const [pendingPreSales, setPendingPreSales] = useState([]);
   const [selectedPreSaleId, setSelectedPreSaleId] = useState(null);
@@ -58,6 +58,17 @@ export default function App() {
   // Pago Mixto y Vuelto
   const [amountMP, setAmountMP] = useState('');
   const [cashTendered, setCashTendered] = useState('');
+
+  // ESTADO DE CAJA Y ARQUEO
+  const [cashStatus, setCashStatus] = useState({ is_open: false });
+  const [initialCashInput, setInitialCashInput] = useState('');
+  const [closeCashInput, setCloseCashInput] = useState('');
+  const [closeAttempt, setCloseAttempt] = useState(1);
+  const [showCloseModal, setShowCloseModal] = useState(false);
+
+  // VERIFICACIÓN DE CAJA (SUPERADMIN / DUEÑO)
+  const [selectedAuditDate, setSelectedAuditDate] = useState(new Date().toISOString().split('T')[0]);
+  const [cashAuditsList, setCashAuditsList] = useState([]);
 
   // Usuarios
   const [usersList, setUsersList] = useState([]);
@@ -71,6 +82,9 @@ export default function App() {
       const users = await fetchUsers();
       setUsersList(users);
       setPendingPreSales(await fetchPendingPreSales());
+      
+      const cStatus = await fetchCashSessionStatus();
+      setCashStatus(cStatus);
 
       const currentUser = users.find(u => u.email === email);
       if (currentUser) {
@@ -96,7 +110,22 @@ export default function App() {
 
   const handleTabChange = async (tabName) => {
     setCurrentTab(tabName);
+    if (tabName === 'verificacion') {
+      loadCashAudits();
+    }
     await loadInitialData();
+  };
+
+  const loadCashAudits = async () => {
+    try {
+      setLoading(true);
+      const data = await fetchCashAuditsByDate(selectedAuditDate);
+      setCashAuditsList(data);
+    } catch (e) {
+      alert('Error cargando auditorías de caja');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleLogin = async () => {
@@ -124,6 +153,52 @@ export default function App() {
     setIsLoggedIn(false);
     setEmail(''); setPassword(''); setUserRole('');
     setIsAccountActive(false); setCanPreventa(false); setCanCaja(false); setCanStock(false); setCanIngreso(false);
+  };
+
+  // APERTURA Y CIERRE DE CAJA
+  const handleOpenCash = async () => {
+    if (!initialCashInput) return alert('Ingresá el monto inicial de caja');
+    try {
+      setLoading(true);
+      const val = parseFloat(initialCashInput.replace(',', '.'));
+      await openCashSession(val, email);
+      alert('✅ Caja abierta correctamente. Podés comenzar a cobrar.');
+      setInitialCashInput('');
+      await loadInitialData();
+    } catch (e) {
+      alert('Error al abrir la caja: ' + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCloseCash = async () => {
+    if (!closeCashInput) return alert('Ingresá el monto final en efectivo contado');
+    try {
+      setLoading(true);
+      const val = parseFloat(closeCashInput.replace(',', '.'));
+      const res = await closeCashSession(val, email, closeAttempt);
+
+      if (res.status === 'mismatch_first_attempt') {
+        alert(res.message);
+        setCloseAttempt(2);
+        setCloseCashInput('');
+      } else {
+        if (res.is_correct) {
+          alert(`✅ ${res.message}`);
+        } else {
+          alert(`⚠️ Arqueo finalizado: ${res.message}`);
+        }
+        setShowCloseModal(false);
+        setCloseCashInput('');
+        setCloseAttempt(1);
+        await loadInitialData();
+      }
+    } catch (e) {
+      alert('Error al cerrar caja: ' + e.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const toggleCamera = async (targetModule) => {
@@ -179,7 +254,6 @@ export default function App() {
     setTimeout(() => setScanned(false), 2000);
   };
 
-  // Guardar Auditoría a Ciegas
   const handleSaveAudit = async () => {
     if (!selectedAuditProd || !countedQtyInput) return alert('Ingresá la cantidad contada');
     try {
@@ -198,7 +272,6 @@ export default function App() {
     }
   };
 
-  // Carrito Vendor
   const addToVendorCart = (prod) => {
     const existing = vendorCart.find(i => i.id === prod.id);
     const step = prod.unit_type === 'kg' ? 0.25 : 1;
@@ -268,7 +341,6 @@ export default function App() {
     }
   };
 
-  // Carrito Caja
   const handleSelectPreSale = (ps) => {
     setSelectedPreSaleId(ps.id);
     setCashierCart(ps.items.map(i => {
@@ -376,6 +448,7 @@ export default function App() {
   };
 
   const handleFinalizeSale = async () => {
+    if (!cashStatus.is_open) return alert('⚠️ Debes abrir la caja antes de procesar ventas.');
     if (cashierCart.length === 0) return alert('No hay productos en el ticket de caja');
     const total = parseFloat(getCashierTotal());
     let cash = 0, mp = 0;
@@ -642,148 +715,266 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>💳 Caja y Cobro</Text>
 
-            <Text style={styles.subSectionTitle}>Pre-ventas Pendientes:</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 15 }}>
-              {pendingPreSales.length === 0 ? <Text style={styles.emptyText}>No hay pre-ventas pendientes.</Text> : (
-                pendingPreSales.map(ps => (
-                  <View key={ps.id} style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <TouchableOpacity 
-                      style={[styles.preSaleBadge, selectedPreSaleId === ps.id && styles.preSaleBadgeActive]} 
-                      onPress={() => handleSelectPreSale(ps)}
-                    >
-                      <Text style={{ fontWeight: 'bold', color: selectedPreSaleId === ps.id ? '#fff' : '#007bff' }}>
-                        Ticket #{ps.id} ({ps.created_at})
-                      </Text>
-                      <Text style={{ color: selectedPreSaleId === ps.id ? '#fff' : '#333' }}>${ps.total.toFixed(2)}</Text>
-                    </TouchableOpacity>
+            {/* SI LA CAJA ESTÁ CERRADA: SOLICITAR MONTO INICIAL */}
+            {!cashStatus.is_open ? (
+              <View style={styles.card}>
+                <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#dc3545', textAlign: 'center', marginBottom: 10 }}>🔴 Caja Cerrada</Text>
+                <Text style={{ color: '#555', textAlign: 'center', marginBottom: 15 }}>
+                  Ingresá el **Fondo Fijo / Monto Inicial en Efectivo** para dar inicio a las ventas de la jornada:
+                </Text>
 
-                    {(userRole === 'superadmin' || userRole === 'dueno') && (
-                      <TouchableOpacity 
-                        style={{ backgroundColor: '#dc3545', padding: 8, borderRadius: 6, marginRight: 12 }} 
-                        onPress={() => handleCancelPreSale(ps.id)}
-                      >
-                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 11 }}>❌ Borrar</Text>
-                      </TouchableOpacity>
-                    )}
+                <TextInput
+                  style={styles.inputHighlight}
+                  placeholder="Monto Inicial en Efectivo ($)"
+                  keyboardType="numeric"
+                  value={initialCashInput}
+                  onChangeText={setInitialCashInput}
+                />
+
+                <TouchableOpacity style={styles.buttonSuccess} onPress={handleOpenCash} disabled={loading}>
+                  <Text style={styles.buttonText}>🔓 Abrir Caja e Iniciar Jornada</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              /* SI LA CAJA ESTÁ ABIERTA: OPERACIÓN NORMAL */
+              <>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#d4edda', padding: 12, borderRadius: 8, marginBottom: 15 }}>
+                  <View>
+                    <Text style={{ fontWeight: 'bold', color: '#155724' }}>🟢 CAJA ABIERTA</Text>
+                    <Text style={{ fontSize: 11, color: '#155724' }}>Abierta por: {cashStatus.opened_by} ({cashStatus.opened_at}) | Fondo: ${cashStatus.initial_amount}</Text>
                   </View>
-                ))
-              )}
-            </ScrollView>
+                  <TouchableOpacity style={{ backgroundColor: '#dc3545', padding: 8, borderRadius: 6 }} onPress={() => setShowCloseModal(true)}>
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 11 }}>🔒 Arqueo / Cierre</Text>
+                  </TouchableOpacity>
+                </View>
 
-            <TouchableOpacity style={styles.buttonCamera} onPress={() => toggleCamera('caja')}>
-              <Text style={styles.buttonText}>{showCamera && cameraTarget === 'caja' ? '📷 Cerrar Escáner' : '📷 Agregar con Escáner EAN'}</Text>
-            </TouchableOpacity>
+                {/* MODAL / PANEL DE CIERRE DE CAJA A CIEGAS */}
+                {showCloseModal && (
+                  <View style={{ backgroundColor: '#fff3cd', padding: 15, borderRadius: 10, borderWidth: 1, borderColor: '#ffeeba', marginBottom: 15 }}>
+                    <Text style={{ fontWeight: 'bold', fontSize: 16, color: '#856404', marginBottom: 6 }}>
+                      🔒 Cierre Único de Caja a Ciegas
+                    </Text>
+                    <Text style={{ fontSize: 12, color: '#856404', marginBottom: 10 }}>
+                      Ingresá el total de dinero en **Efectivo** contado en la caja:
+                    </Text>
 
-            {showCamera && cameraTarget === 'caja' && permission?.granted && (
-              <View style={styles.cameraContainer}>
-                <CameraView style={StyleSheet.absoluteFillObject} facing="back" onBarcodeScanned={scanned ? undefined : handleBarcodeScanned} />
-              </View>
-            )}
-
-            <Text style={styles.subSectionTitle}>🔍 Agregar Producto Adicional:</Text>
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Buscar para agregar al ticket..."
-              value={searchQueryCashier}
-              onChangeText={setSearchQueryCashier}
-            />
-
-            {searchQueryCashier.trim() !== '' && (
-              <View style={styles.dropdownContainer}>
-                {filteredProductsCashier.length === 0 ? (
-                  <Text style={{ padding: 10, color: '#888' }}>No se encontraron coincidencias.</Text>
-                ) : (
-                  filteredProductsCashier.map(p => (
-                    <TouchableOpacity key={p.id} style={styles.dropdownItem} onPress={() => addToCashierCart(p)}>
-                      <Text style={{ fontWeight: 'bold' }}>{p.name}</Text>
-                      <Text style={{ color: '#28a745', fontSize: 12 }}>${p.price_per_unit} / {p.unit_type} | Stock: {p.stock} {p.unit_type}</Text>
-                    </TouchableOpacity>
-                  ))
-                )}
-              </View>
-            )}
-
-            <Text style={styles.subSectionTitle}>Edición de Ticket en Caja:</Text>
-            {cashierCart.length === 0 ? <Text style={styles.emptyText}>Seleccioná una pre-venta o agregá productos.</Text> : (
-              cashierCart.map(i => (
-                <View key={i.id} style={styles.cartRow}>
-                  <Text style={{ flex: 1, fontWeight: 'bold' }}>{i.name}</Text>
-                  
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <TouchableOpacity style={styles.qtyBtn} onPress={() => updateCashierCartQty(i.id, -1)}>
-                      <Text style={{ color: '#fff', fontWeight: 'bold' }}>-</Text>
-                    </TouchableOpacity>
-                    
                     <TextInput
-                      style={styles.inputSmall}
+                      style={styles.inputHighlight}
+                      placeholder="Monto total contado ($)"
                       keyboardType="numeric"
-                      value={String(i.qty)}
-                      onChangeText={(val) => updateCashierCartDirectQty(i.id, val)}
+                      value={closeCashInput}
+                      onChangeText={setCloseCashInput}
                     />
 
-                    <TouchableOpacity style={styles.qtyBtn} onPress={() => updateCashierCartQty(i.id, 1)}>
-                      <Text style={{ color: '#fff', fontWeight: 'bold' }}>+</Text>
-                    </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
+                      <TouchableOpacity style={[styles.buttonPrimary, { flex: 0.48, backgroundColor: '#6c757d' }]} onPress={() => { setShowCloseModal(false); setCloseAttempt(1); }}>
+                        <Text style={styles.buttonText}>Cancelar</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[styles.buttonDanger, { flex: 0.48 }]} onPress={handleCloseCash} disabled={loading}>
+                        <Text style={styles.buttonText}>Confirmar Cierre</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )}
 
-                    <Text style={{ fontSize: 11, marginLeft: 4, marginRight: 8, color: '#444' }}>{i.unit_type}</Text>
+                <Text style={styles.subSectionTitle}>Pre-ventas Pendientes:</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 15 }}>
+                  {pendingPreSales.length === 0 ? <Text style={styles.emptyText}>No hay pre-ventas pendientes.</Text> : (
+                    pendingPreSales.map(ps => (
+                      <View key={ps.id} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <TouchableOpacity 
+                          style={[styles.preSaleBadge, selectedPreSaleId === ps.id && styles.preSaleBadgeActive]} 
+                          onPress={() => handleSelectPreSale(ps)}
+                        >
+                          <Text style={{ fontWeight: 'bold', color: selectedPreSaleId === ps.id ? '#fff' : '#007bff' }}>
+                            Ticket #{ps.id} ({ps.created_at})
+                          </Text>
+                          <Text style={{ color: selectedPreSaleId === ps.id ? '#fff' : '#333' }}>${ps.total.toFixed(2)}</Text>
+                        </TouchableOpacity>
+
+                        {(userRole === 'superadmin' || userRole === 'dueno') && (
+                          <TouchableOpacity 
+                            style={{ backgroundColor: '#dc3545', padding: 8, borderRadius: 6, marginRight: 12 }} 
+                            onPress={() => handleCancelPreSale(ps.id)}
+                          >
+                            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 11 }}>❌ Borrar</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    ))
+                  )}
+                </ScrollView>
+
+                <TouchableOpacity style={styles.buttonCamera} onPress={() => toggleCamera('caja')}>
+                  <Text style={styles.buttonText}>{showCamera && cameraTarget === 'caja' ? '📷 Cerrar Escáner' : '📷 Agregar con Escáner EAN'}</Text>
+                </TouchableOpacity>
+
+                {showCamera && cameraTarget === 'caja' && permission?.granted && (
+                  <View style={styles.cameraContainer}>
+                    <CameraView style={StyleSheet.absoluteFillObject} facing="back" onBarcodeScanned={scanned ? undefined : handleBarcodeScanned} />
+                  </View>
+                )}
+
+                <Text style={styles.subSectionTitle}>🔍 Agregar Producto Adicional:</Text>
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Buscar para agregar al ticket..."
+                  value={searchQueryCashier}
+                  onChangeText={setSearchQueryCashier}
+                />
+
+                {searchQueryCashier.trim() !== '' && (
+                  <View style={styles.dropdownContainer}>
+                    {filteredProductsCashier.length === 0 ? (
+                      <Text style={{ padding: 10, color: '#888' }}>No se encontraron coincidencias.</Text>
+                    ) : (
+                      filteredProductsCashier.map(p => (
+                        <TouchableOpacity key={p.id} style={styles.dropdownItem} onPress={() => addToCashierCart(p)}>
+                          <Text style={{ fontWeight: 'bold' }}>{p.name}</Text>
+                          <Text style={{ color: '#28a745', fontSize: 12 }}>${p.price_per_unit} / {p.unit_type} | Stock: {p.stock} {p.unit_type}</Text>
+                        </TouchableOpacity>
+                      ))
+                    )}
+                  </View>
+                )}
+
+                <Text style={styles.subSectionTitle}>Edición de Ticket en Caja:</Text>
+                {cashierCart.length === 0 ? <Text style={styles.emptyText}>Seleccioná una pre-venta o agregá productos.</Text> : (
+                  cashierCart.map(i => (
+                    <View key={i.id} style={styles.cartRow}>
+                      <Text style={{ flex: 1, fontWeight: 'bold' }}>{i.name}</Text>
+                      
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <TouchableOpacity style={styles.qtyBtn} onPress={() => updateCashierCartQty(i.id, -1)}>
+                          <Text style={{ color: '#fff', fontWeight: 'bold' }}>-</Text>
+                        </TouchableOpacity>
+                        
+                        <TextInput
+                          style={styles.inputSmall}
+                          keyboardType="numeric"
+                          value={String(i.qty)}
+                          onChangeText={(val) => updateCashierCartDirectQty(i.id, val)}
+                        />
+
+                        <TouchableOpacity style={styles.qtyBtn} onPress={() => updateCashierCartQty(i.id, 1)}>
+                          <Text style={{ color: '#fff', fontWeight: 'bold' }}>+</Text>
+                        </TouchableOpacity>
+
+                        <Text style={{ fontSize: 11, marginLeft: 4, marginRight: 8, color: '#444' }}>{i.unit_type}</Text>
+                      </View>
+
+                      <Text style={{ fontWeight: 'bold' }}>${((i.price_per_unit) * (parseFloat(i.qty) || 0)).toFixed(2)}</Text>
+                    </View>
+                  ))
+                )}
+
+                <Text style={styles.subSectionTitle}>Método de Pago:</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <TouchableOpacity style={[styles.payBtn, paymentMethod === 'Efectivo' && styles.payBtnActive]} onPress={() => setPaymentMethod('Efectivo')}><Text style={styles.buttonText}>Efectivo</Text></TouchableOpacity>
+                  <TouchableOpacity style={[styles.payBtn, paymentMethod === 'Mercado Pago' && styles.payBtnActive]} onPress={() => setPaymentMethod('Mercado Pago')}><Text style={styles.buttonText}>Mercado Pago</Text></TouchableOpacity>
+                  <TouchableOpacity style={[styles.payBtn, paymentMethod === 'Mixto' && styles.payBtnActive]} onPress={() => setPaymentMethod('Mixto')}><Text style={styles.buttonText}>Mixto</Text></TouchableOpacity>
+                </View>
+
+                {paymentMethod === 'Mixto' && (
+                  <View style={styles.card}>
+                    <Text style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 5 }}>📱 Cobro con Mercado Pago:</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Monto a cobrar por MP ($)"
+                      keyboardType="numeric"
+                      value={amountMP}
+                      onChangeText={setAmountMP}
+                    />
+                    <Text style={{ fontSize: 13, color: '#007bff', fontWeight: 'bold', marginTop: 4 }}>
+                      💵 Restante a cobrar en Efectivo: ${getRequiredCash().toFixed(2)}
+                    </Text>
+                  </View>
+                )}
+
+                {(paymentMethod === 'Efectivo' || paymentMethod === 'Mixto') && (
+                  <View style={styles.changeCard}>
+                    <Text style={{ fontWeight: 'bold', fontSize: 13, color: '#333', marginBottom: 6 }}>
+                      💵 Paga con Billete/Efectivo: (Requerido: ${getRequiredCash().toFixed(2)})
+                    </Text>
+                    <TextInput
+                      style={styles.inputHighlight}
+                      placeholder={`Ej: ${getRequiredCash().toFixed(2)}`}
+                      keyboardType="numeric"
+                      value={cashTendered}
+                      onChangeText={setCashTendered}
+                    />
+                    
+                    <View style={styles.changeRow}>
+                      <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#155724' }}>💰 Vuelto en Efectivo:</Text>
+                      <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#28a745' }}>${getChangeDue()}</Text>
+                    </View>
+                  </View>
+                )}
+
+                <View style={styles.totalBox}>
+                  <Text style={{ fontSize: 18, fontWeight: 'bold' }}>TOTAL TICKET:</Text>
+                  <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#28a745' }}>${getCashierTotal()}</Text>
+                </View>
+
+                <TouchableOpacity style={styles.buttonSuccess} onPress={handleFinalizeSale} disabled={loading}>
+                  <Text style={styles.buttonText}>💳 Concretar Venta y Cobrar</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </ScrollView>
+        )}
+
+        {/* VERIFICACIÓN DE CAJA (DUEÑO / SUPERADMIN) */}
+        {currentTab === 'verificacion' && (userRole === 'superadmin' || userRole === 'dueno') && (
+          <ScrollView contentContainerStyle={styles.scrollPadding}>
+            <Text style={styles.sectionTitle}>🔍 Verificación de Caja y Auditoría</Text>
+            
+            <View style={styles.card}>
+              <Text style={{ fontWeight: 'bold', marginBottom: 6 }}>Filtrar por Fecha (AAAA-MM-DD):</Text>
+              <View style={{ flexDirection: 'row' }}>
+                <TextInput
+                  style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                  value={selectedAuditDate}
+                  onChangeText={setSelectedAuditDate}
+                  placeholder="YYYY-MM-DD"
+                />
+                <TouchableOpacity style={[styles.buttonPrimary, { marginLeft: 8, marginTop: 0 }]} onPress={loadCashAudits}>
+                  <Text style={styles.buttonText}>🔍 Buscar</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {cashAuditsList.length === 0 ? (
+              <Text style={styles.emptyText}>No hay registros de caja para la fecha seleccionada.</Text>
+            ) : (
+              cashAuditsList.map(audit => (
+                <View key={audit.id} style={styles.card}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <Text style={{ fontWeight: 'bold', fontSize: 16 }}>Jornada: {audit.date}</Text>
+                    <Text style={{ fontWeight: 'bold', color: audit.is_open ? '#28a745' : '#dc3545' }}>
+                      {audit.is_open ? '🟢 EN CURSO' : '🔴 CERRADA'}
+                    </Text>
                   </View>
 
-                  <Text style={{ fontWeight: 'bold' }}>${((i.price_per_unit) * (parseFloat(i.qty) || 0)).toFixed(2)}</Text>
+                  <Text style={{ fontSize: 12, color: '#555' }}>Apertura: {audit.opened_at} por {audit.opened_by}</Text>
+                  <Text style={{ fontSize: 12, color: '#555' }}>Cierre: {audit.closed_at} por {audit.closed_by}</Text>
+                  <Text style={{ fontSize: 12, color: '#555', marginBottom: 8 }}>Tickets cobrados: {audit.total_sales_count}</Text>
+
+                  <View style={{ backgroundColor: '#f8f9fa', padding: 10, borderRadius: 8, borderLeftWidth: 4, borderLeftColor: '#007bff' }}>
+                    <Text style={{ fontSize: 13 }}>Fondo Inicial: <Text style={{ fontWeight: 'bold' }}>${audit.initial_amount}</Text></Text>
+                    <Text style={{ fontSize: 13 }}>Total Mercado Pago: <Text style={{ fontWeight: 'bold', color: '#007bff' }}>${audit.total_mp || 0}</Text></Text>
+                    <Text style={{ fontSize: 13 }}>Efectivo Teórico Esperado: <Text style={{ fontWeight: 'bold' }}>${audit.expected_cash || 0}</Text></Text>
+                    <Text style={{ fontSize: 13 }}>Efectivo Reportado a Ciegas: <Text style={{ fontWeight: 'bold' }}>${audit.reported_cash || 0}</Text></Text>
+                    
+                    {audit.difference !== null && (
+                      <Text style={{ fontSize: 14, fontWeight: 'bold', marginTop: 4, color: audit.difference === 0 ? '#28a745' : '#dc3545' }}>
+                        Diferencia: ${audit.difference} ({audit.status_message})
+                      </Text>
+                    )}
+                  </View>
                 </View>
               ))
             )}
-
-            <Text style={styles.subSectionTitle}>Método de Pago:</Text>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
-              <TouchableOpacity style={[styles.payBtn, paymentMethod === 'Efectivo' && styles.payBtnActive]} onPress={() => setPaymentMethod('Efectivo')}><Text style={styles.buttonText}>Efectivo</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.payBtn, paymentMethod === 'Mercado Pago' && styles.payBtnActive]} onPress={() => setPaymentMethod('Mercado Pago')}><Text style={styles.buttonText}>Mercado Pago</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.payBtn, paymentMethod === 'Mixto' && styles.payBtnActive]} onPress={() => setPaymentMethod('Mixto')}><Text style={styles.buttonText}>Mixto</Text></TouchableOpacity>
-            </View>
-
-            {paymentMethod === 'Mixto' && (
-              <View style={styles.card}>
-                <Text style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 5 }}>📱 Cobro con Mercado Pago:</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Monto a cobrar por MP ($)"
-                  keyboardType="numeric"
-                  value={amountMP}
-                  onChangeText={setAmountMP}
-                />
-                <Text style={{ fontSize: 13, color: '#007bff', fontWeight: 'bold', marginTop: 4 }}>
-                  💵 Restante a cobrar en Efectivo: ${getRequiredCash().toFixed(2)}
-                </Text>
-              </View>
-            )}
-
-            {(paymentMethod === 'Efectivo' || paymentMethod === 'Mixto') && (
-              <View style={styles.changeCard}>
-                <Text style={{ fontWeight: 'bold', fontSize: 13, color: '#333', marginBottom: 6 }}>
-                  💵 Paga con Billete/Efectivo: (Requerido: ${getRequiredCash().toFixed(2)})
-                </Text>
-                <TextInput
-                  style={styles.inputHighlight}
-                  placeholder={`Ej: ${getRequiredCash().toFixed(2)}`}
-                  keyboardType="numeric"
-                  value={cashTendered}
-                  onChangeText={setCashTendered}
-                />
-                
-                <View style={styles.changeRow}>
-                  <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#155724' }}>💰 Vuelto en Efectivo:</Text>
-                  <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#28a745' }}>${getChangeDue()}</Text>
-                </View>
-              </View>
-            )}
-
-            <View style={styles.totalBox}>
-              <Text style={{ fontSize: 18, fontWeight: 'bold' }}>TOTAL TICKET:</Text>
-              <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#28a745' }}>${getCashierTotal()}</Text>
-            </View>
-
-            <TouchableOpacity style={styles.buttonSuccess} onPress={handleFinalizeSale} disabled={loading}>
-              <Text style={styles.buttonText}>💳 Concretar Venta y Cobrar</Text>
-            </TouchableOpacity>
           </ScrollView>
         )}
 
@@ -792,7 +983,6 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>📦 Auditoría y Control de Inventario</Text>
 
-            {/* SECCIÓN OPERARIO: CONTEO A CIEGAS */}
             <View style={styles.card}>
               <Text style={styles.subSectionTitle}>👁️ Conteo Físico a Ciegas (Operario)</Text>
               <Text style={{ fontSize: 12, color: '#666', marginBottom: 10 }}>
@@ -851,7 +1041,6 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
               )}
             </View>
 
-            {/* TABLA COMPARATIVA CON COSTOS Y MARGEN (SÓLO VISIBLE PARA SUPERADMIN / DUEÑO) */}
             {(userRole === 'superadmin' || userRole === 'dueno') && (
               <View style={{ marginTop: 10 }}>
                 <Text style={styles.subSectionTitle}>📊 Control Financiero y Auditable de Stock</Text>
@@ -906,7 +1095,6 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
               <TextInput style={styles.input} placeholder="Nombre del Producto" value={prodName} onChangeText={setProdName} />
               <TextInput style={styles.input} placeholder="Categoría (ej: Fiambres, Quesos, Miel)" value={prodCategory} onChangeText={setProdCategory} />
               
-              {/* CAMPOS EXCLUSIVOS DE COSTO Y PROVEEDOR */}
               {(userRole === 'superadmin' || userRole === 'dueno') && (
                 <>
                   <TextInput style={styles.input} placeholder="Proveedor (ej: Distribuidora Pepito)" value={prodSupplier} onChangeText={setProdSupplier} />
@@ -1086,6 +1274,12 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
           </TouchableOpacity>
         )}
 
+        {(userRole === 'superadmin' || userRole === 'dueno') && (
+          <TouchableOpacity style={[styles.navBtn, currentTab === 'verificacion' && styles.navActive]} onPress={() => handleTabChange('verificacion')}>
+            <Text style={styles.navText}>🔍 Arqueo</Text>
+          </TouchableOpacity>
+        )}
+
         {(canStock || userRole === 'superadmin') && (
           <TouchableOpacity style={[styles.navBtn, currentTab === 'inventario' && styles.navActive]} onPress={() => handleTabChange('inventario')}>
             <Text style={styles.navText}>📦 Stock</Text>
@@ -1156,5 +1350,5 @@ const styles = StyleSheet.create({
   },
   navBtn: { flex: 1, padding: 6, alignItems: 'center' },
   navActive: { borderTopWidth: 3, borderTopColor: '#007bff' },
-  navText: { color: '#444', fontWeight: 'bold', fontSize: 10 }
+  navText: { color: '#444', fontWeight: 'bold', fontSize: 9 }
 });
