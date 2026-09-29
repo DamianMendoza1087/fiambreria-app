@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, activateCashier, createPreSale, fetchPendingPreSales, finalizeSale } from './api';
+import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserStatus, activateCashier, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale } from './api';
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -10,7 +10,7 @@ export default function App() {
   const [isCashierActive, setIsCashierActive] = useState(false);
   const [currentTab, setCurrentTab] = useState('preventa');
   
-  // Login en blanco (seguridad)
+  // Login en blanco
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -56,7 +56,6 @@ export default function App() {
       setUsersList(users);
       setPendingPreSales(await fetchPendingPreSales());
 
-      // Verificar si el usuario logueado sigue activo o es el cajero de turno
       const currentUser = users.find(u => u.email === email);
       if (currentUser) {
         setIsAccountActive(currentUser.is_active);
@@ -96,7 +95,7 @@ export default function App() {
         setIsAccountActive(currentUser.is_active);
         setIsCashierActive(currentUser.is_cashier_active);
       } else {
-        setIsAccountActive(true); // Fallback admin
+        setIsAccountActive(true);
       }
       await loadInitialData();
     } catch (e) {
@@ -243,6 +242,23 @@ export default function App() {
     }));
     setCashTendered('');
     setAmountMP('');
+  };
+
+  const handleCancelPreSale = async (psId) => {
+    try {
+      setLoading(true);
+      await deletePreSale(psId);
+      alert(`🗑️ Pre-venta #${psId} cancelada con éxito`);
+      if (selectedPreSaleId === psId) {
+        setSelectedPreSaleId(null);
+        setCashierCart([]);
+      }
+      await loadInitialData();
+    } catch (e) {
+      alert('Error al cancelar la pre-venta');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const updateCashierCartQty = (id, delta) => {
@@ -429,9 +445,21 @@ export default function App() {
       await createUser({ name: newUserName, email: newUserEmail, password: newUserPass, role: newUserRole });
       setNewUserName(''); setNewUserEmail(''); setNewUserPass('');
       await loadInitialData();
-      alert('Usuario creado con éxito');
+      alert('Usuario registrado. Se encuentra INACTIVO hasta que lo habilites.');
     } catch (e) {
       alert('Error al registrar usuario');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleToggleUserActive = async (user) => {
+    try {
+      setLoading(true);
+      await updateUserStatus(user.id, { is_active: !user.is_active });
+      await loadInitialData();
+    } catch (e) {
+      alert('Error al cambiar estado del usuario');
     } finally {
       setLoading(false);
     }
@@ -450,7 +478,6 @@ export default function App() {
     }
   };
 
-  // PANTALLA DE LOGIN EN BLANCO
   if (!isLoggedIn) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -466,7 +493,6 @@ export default function App() {
     );
   }
 
-  // PANTALLA BLOQUEADA SI EL USUARIO NO FUE ACTIVADO POR EL ADMIN
   if (!isAccountActive && userRole !== 'superadmin') {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -493,7 +519,7 @@ return (
       </View>
 
       <View style={styles.body}>
-        {/* PRE-VENTA (Cualquier usuario habilitado) */}
+        {/* PRE-VENTA */}
         {currentTab === 'preventa' && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>🛒 Armar Pre-venta (Mostrador)</Text>
@@ -565,16 +591,26 @@ return (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 15 }}>
               {pendingPreSales.length === 0 ? <Text style={styles.emptyText}>No hay pre-ventas pendientes.</Text> : (
                 pendingPreSales.map(ps => (
-                  <TouchableOpacity 
-                    key={ps.id} 
-                    style={[styles.preSaleBadge, selectedPreSaleId === ps.id && styles.preSaleBadgeActive]} 
-                    onPress={() => handleSelectPreSale(ps)}
-                  >
-                    <Text style={{ fontWeight: 'bold', color: selectedPreSaleId === ps.id ? '#fff' : '#007bff' }}>
-                      Ticket #{ps.id} ({ps.created_at})
-                    </Text>
-                    <Text style={{ color: selectedPreSaleId === ps.id ? '#fff' : '#333' }}>${ps.total.toFixed(2)}</Text>
-                  </TouchableOpacity>
+                  <View key={ps.id} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <TouchableOpacity 
+                      style={[styles.preSaleBadge, selectedPreSaleId === ps.id && styles.preSaleBadgeActive]} 
+                      onPress={() => handleSelectPreSale(ps)}
+                    >
+                      <Text style={{ fontWeight: 'bold', color: selectedPreSaleId === ps.id ? '#fff' : '#007bff' }}>
+                        Ticket #{ps.id} ({ps.created_at})
+                      </Text>
+                      <Text style={{ color: selectedPreSaleId === ps.id ? '#fff' : '#333' }}>${ps.total.toFixed(2)}</Text>
+                    </TouchableOpacity>
+
+                    {(userRole === 'superadmin' || userRole === 'dueno') && (
+                      <TouchableOpacity 
+                        style={{ backgroundColor: '#dc3545', padding: 8, borderRadius: 6, marginRight: 12 }} 
+                        onPress={() => handleCancelPreSale(ps.id)}
+                      >
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 11 }}>❌ Borrar</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 ))
               )}
             </ScrollView>
@@ -673,7 +709,7 @@ return (
           </ScrollView>
         )}
 
-        {/* INVENTARIO (SUPERADMIN / DUEÑO / ENCARGADO) */}
+        {/* INVENTARIO */}
         {currentTab === 'inventario' && (userRole === 'superadmin' || userRole === 'dueno' || userRole === 'encargado') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>📦 Control de Inventario</Text>
@@ -753,7 +789,7 @@ return (
           </ScrollView>
         )}
 
-        {/* USUARIOS & PERMISOS (SUPERADMIN / DUEÑO) */}
+        {/* USUARIOS & PERMISOS PANEL SUPERADMIN */}
         {currentTab === 'usuarios' && (userRole === 'superadmin' || userRole === 'dueno') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>👥 Gestión de Personal y Permisos</Text>
@@ -768,24 +804,42 @@ return (
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.subSectionTitle}>Personal Registrado y Permisos</Text>
+            <Text style={styles.subSectionTitle}>Personal Registrado y Control de Acceso</Text>
             {usersList.map(u => (
               <View key={u.id} style={styles.productCard}>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontWeight: 'bold', fontSize: 15 }}>{u.name} ({u.role})</Text>
                   <Text style={{ color: '#666', fontSize: 12 }}>{u.email}</Text>
-                  <Text style={{ color: u.is_cashier_active ? '#28a745' : '#666', fontWeight: 'bold', marginTop: 4 }}>
-                    {u.is_cashier_active ? '🟢 CAJERO DE TURNO' : '⚪ Fuera de Caja'}
-                  </Text>
+                  
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                    <Text style={{ color: u.is_active ? '#28a745' : '#dc3545', fontWeight: 'bold', marginRight: 10 }}>
+                      {u.is_active ? '🟢 Cuenta HABILITADA' : '🔴 Cuenta INACTIVA'}
+                    </Text>
+                    
+                    <Text style={{ color: u.is_cashier_active ? '#007bff' : '#888', fontSize: 11 }}>
+                      {u.is_cashier_active ? '💳 Cajero Activo' : '⚪ Sin Caja'}
+                    </Text>
+                  </View>
                 </View>
 
-                <View style={{ flexDirection: 'column', alignItems: 'flex-end' }}>
-                  {!u.is_cashier_active && (
-                    <TouchableOpacity style={[styles.buttonSuccess, { padding: 6, marginBottom: 4 }]} onPress={() => handleSetCashier(u.id)}>
-                      <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>Asignar Caja</Text>
+                {u.role !== 'superadmin' && (
+                  <View style={{ flexDirection: 'column', alignItems: 'flex-end' }}>
+                    <TouchableOpacity 
+                      style={[styles.typeBtn, { padding: 6, marginBottom: 4, backgroundColor: u.is_active ? '#dc3545' : '#28a745' }]} 
+                      onPress={() => handleToggleUserActive(u)}
+                    >
+                      <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>
+                        {u.is_active ? 'Inhabilitar' : 'Habilitar'}
+                      </Text>
                     </TouchableOpacity>
-                  )}
-                </View>
+
+                    {!u.is_cashier_active && (
+                      <TouchableOpacity style={[styles.buttonSuccess, { padding: 6 }]} onPress={() => handleSetCashier(u.id)}>
+                        <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>Asignar Caja</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
               </View>
             ))}
           </ScrollView>
