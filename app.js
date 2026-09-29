@@ -1,13 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserStatus, activateCashier, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale } from './api';
+import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale } from './api';
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userRole, setUserRole] = useState('');
+  
+  // Permisos dinámicos del usuario activo
   const [isAccountActive, setIsAccountActive] = useState(false);
-  const [isCashierActive, setIsCashierActive] = useState(false);
+  const [canPreventa, setCanPreventa] = useState(true);
+  const [canCaja, setCanCaja] = useState(false);
+  const [canStock, setCanStock] = useState(false);
+  
   const [currentTab, setCurrentTab] = useState('preventa');
   
   // Login en blanco
@@ -47,7 +52,6 @@ export default function App() {
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPass, setNewUserPass] = useState('');
-  const [newUserRole, setNewUserRole] = useState('cajero');
 
   const loadInitialData = async () => {
     try {
@@ -59,7 +63,9 @@ export default function App() {
       const currentUser = users.find(u => u.email === email);
       if (currentUser) {
         setIsAccountActive(currentUser.is_active);
-        setIsCashierActive(currentUser.is_cashier_active);
+        setCanPreventa(currentUser.can_preventa);
+        setCanCaja(currentUser.can_caja);
+        setCanStock(currentUser.can_stock);
       }
     } catch (e) {
       console.log('Error de sincronización:', e.message);
@@ -86,17 +92,12 @@ export default function App() {
       setLoading(true);
       const res = await loginUser(email, password);
       setIsLoggedIn(true);
-      if (res.role) setUserRole(res.role);
+      setUserRole(res.role || 'vendedor');
+      setIsAccountActive(res.is_active);
+      setCanPreventa(res.can_preventa);
+      setCanCaja(res.can_caja);
+      setCanStock(res.can_stock);
       
-      const users = await fetchUsers();
-      setUsersList(users);
-      const currentUser = users.find(u => u.email === email);
-      if (currentUser) {
-        setIsAccountActive(currentUser.is_active);
-        setIsCashierActive(currentUser.is_cashier_active);
-      } else {
-        setIsAccountActive(true);
-      }
       await loadInitialData();
     } catch (e) {
       alert('Error de inicio de sesión: ' + e.message);
@@ -107,11 +108,8 @@ export default function App() {
 
   const handleLogout = () => {
     setIsLoggedIn(false);
-    setEmail('');
-    setPassword('');
-    setUserRole('');
-    setIsAccountActive(false);
-    setIsCashierActive(false);
+    setEmail(''); setPassword(''); setUserRole('');
+    setIsAccountActive(false); setCanPreventa(false); setCanCaja(false); setCanStock(false);
   };
 
   const toggleCamera = async (targetModule) => {
@@ -152,7 +150,7 @@ export default function App() {
         addToCashierCart(found);
         alert(`✅ Agregado a Caja: ${found.name}`);
       } else {
-        alert(`⚠️ Código EAN ${data} no encontrado en el catálogo.`);
+        alert(`⚠️️ Código EAN ${data} no encontrado en el catálogo.`);
       }
     }
 
@@ -240,15 +238,14 @@ export default function App() {
         maxStock: prod ? prod.stock : 999
       };
     }));
-    setCashTendered('');
-    setAmountMP('');
+    setCashTendered(''); setAmountMP('');
   };
 
   const handleCancelPreSale = async (psId) => {
     try {
       setLoading(true);
       await deletePreSale(psId);
-      alert(`🗑️ Pre-venta #${psId} cancelada con éxito`);
+      alert(`🗑️ Pre-venta #${psId} cancelada`);
       if (selectedPreSaleId === psId) {
         setSelectedPreSaleId(null);
         setCashierCart([]);
@@ -342,7 +339,7 @@ export default function App() {
       cash = total;
       const tendered = parseFloat(cashTendered) || 0;
       if (tendered < total) {
-        return alert(`⚠️ El dinero en efectivo ingresado ($${tendered}) es menor que el total ($${total})`);
+        return alert(`⚠️ El dinero ingresado ($${tendered}) es menor que el total ($${total})`);
       }
     } else if (paymentMethod === 'Mercado Pago') {
       mp = total;
@@ -354,7 +351,7 @@ export default function App() {
       cash = total - mp;
       const tendered = parseFloat(cashTendered) || 0;
       if (cash > 0 && tendered < cash) {
-        return alert(`⚠️ El dinero ingresado ($${tendered}) es menor que el saldo a cobrar en efectivo ($${cash.toFixed(2)})`);
+        return alert(`⚠️ El dinero ingresado ($${tendered}) es menor que el saldo en efectivo ($${cash.toFixed(2)})`);
       }
     }
 
@@ -442,10 +439,10 @@ export default function App() {
     if (!newUserName || !newUserEmail || !newUserPass) return alert('Completá los datos del usuario');
     try {
       setLoading(true);
-      await createUser({ name: newUserName, email: newUserEmail, password: newUserPass, role: newUserRole });
+      await createUser({ name: newUserName, email: newUserEmail, password: newUserPass });
       setNewUserName(''); setNewUserEmail(''); setNewUserPass('');
       await loadInitialData();
-      alert('Usuario registrado. Se encuentra INACTIVO hasta que lo habilites.');
+      alert('Empleado registrado. Habilitale los módulos correspondientes.');
     } catch (e) {
       alert('Error al registrar usuario');
     } finally {
@@ -453,26 +450,19 @@ export default function App() {
     }
   };
 
-  const handleToggleUserActive = async (user) => {
+  const handleTogglePermission = async (user, permKey) => {
     try {
       setLoading(true);
-      await updateUserStatus(user.id, { is_active: !user.is_active });
+      const updated = {
+        is_active: permKey === 'is_active' ? !user.is_active : user.is_active,
+        can_preventa: permKey === 'can_preventa' ? !user.can_preventa : user.can_preventa,
+        can_caja: permKey === 'can_caja' ? !user.can_caja : user.can_caja,
+        can_stock: permKey === 'can_stock' ? !user.can_stock : user.can_stock,
+      };
+      await updateUserPermissions(user.id, updated);
       await loadInitialData();
     } catch (e) {
-      alert('Error al cambiar estado del usuario');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSetCashier = async (userId) => {
-    try {
-      setLoading(true);
-      await activateCashier(userId);
-      await loadInitialData();
-      alert('Caja asignada correctamente');
-    } catch (e) {
-      alert('Error al asignar caja');
+      alert('Error al actualizar permisos del usuario');
     } finally {
       setLoading(false);
     }
@@ -499,7 +489,7 @@ export default function App() {
         <View style={styles.loginCard}>
           <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#dc3545', textAlign: 'center', marginBottom: 10 }}>🔒 Cuenta Inactiva</Text>
           <Text style={{ textAlign: 'center', color: '#555', marginBottom: 20 }}>
-            Tu usuario aún no ha sido habilitado por el Administrador. Por favor consultá con el responsable.
+            Tu usuario aún no ha sido habilitado por el Administrador.
           </Text>
           <TouchableOpacity style={styles.buttonDanger} onPress={handleLogout}>
             <Text style={styles.buttonText}>Cerrar Sesión</Text>
@@ -520,7 +510,7 @@ return (
 
       <View style={styles.body}>
         {/* PRE-VENTA */}
-        {currentTab === 'preventa' && (
+        {currentTab === 'preventa' && (canPreventa || userRole === 'superadmin') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>🛒 Armar Pre-venta (Mostrador)</Text>
             
@@ -582,8 +572,8 @@ return (
           </ScrollView>
         )}
 
-        {/* CAJA (SÓLO SI ES CAJERO DE TURNO O SUPERADMIN/DUEÑO) */}
-        {currentTab === 'caja' && (isCashierActive || userRole === 'superadmin' || userRole === 'dueno') && (
+        {/* CAJA */}
+        {currentTab === 'caja' && (canCaja || userRole === 'superadmin') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>💳 Caja y Cobro</Text>
 
@@ -710,7 +700,7 @@ return (
         )}
 
         {/* INVENTARIO */}
-        {currentTab === 'inventario' && (userRole === 'superadmin' || userRole === 'dueno' || userRole === 'encargado') && (
+        {currentTab === 'inventario' && (canStock || userRole === 'superadmin') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>📦 Control de Inventario</Text>
             <View style={styles.card}>
@@ -789,7 +779,7 @@ return (
           </ScrollView>
         )}
 
-        {/* USUARIOS & PERMISOS PANEL SUPERADMIN */}
+        {/* PANEL DE CONTROL DE PERMISOS GRANULARES (SUPERADMIN / DUEÑO) */}
         {currentTab === 'usuarios' && (userRole === 'superadmin' || userRole === 'dueno') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>👥 Gestión de Personal y Permisos</Text>
@@ -798,46 +788,66 @@ return (
               <TextInput style={styles.input} placeholder="Nombre Completo" value={newUserName} onChangeText={setNewUserName} />
               <TextInput style={styles.input} placeholder="Correo Electrónico" value={newUserEmail} onChangeText={setNewUserEmail} autoCapitalize="none" />
               <TextInput style={styles.input} placeholder="Contraseña" secureTextEntry value={newUserPass} onChangeText={setNewUserPass} />
-              <TextInput style={styles.input} placeholder="Rol (dueno, encargado, vendedor, cajero, auditor)" value={newUserRole} onChangeText={setNewUserRole} />
               <TouchableOpacity style={styles.buttonPrimary} onPress={handleCreateUser} disabled={loading}>
                 <Text style={styles.buttonText}>+ Guardar Empleado</Text>
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.subSectionTitle}>Personal Registrado y Control de Acceso</Text>
+            <Text style={styles.subSectionTitle}>Configuración de Módulos por Empleado</Text>
             {usersList.map(u => (
-              <View key={u.id} style={styles.productCard}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontWeight: 'bold', fontSize: 15 }}>{u.name} ({u.role})</Text>
-                  <Text style={{ color: '#666', fontSize: 12 }}>{u.email}</Text>
-                  
-                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
-                    <Text style={{ color: u.is_active ? '#28a745' : '#dc3545', fontWeight: 'bold', marginRight: 10 }}>
-                      {u.is_active ? '🟢 Cuenta HABILITADA' : '🔴 Cuenta INACTIVA'}
-                    </Text>
-                    
-                    <Text style={{ color: u.is_cashier_active ? '#007bff' : '#888', fontSize: 11 }}>
-                      {u.is_cashier_active ? '💳 Cajero Activo' : '⚪ Sin Caja'}
-                    </Text>
+              <View key={u.id} style={[styles.card, { marginBottom: 12 }]}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <View>
+                    <Text style={{ fontWeight: 'bold', fontSize: 16 }}>{u.name}</Text>
+                    <Text style={{ color: '#666', fontSize: 12 }}>{u.email}</Text>
                   </View>
+                  
+                  {u.role !== 'superadmin' && (
+                    <TouchableOpacity 
+                      style={[styles.typeBtn, { padding: 6, backgroundColor: u.is_active ? '#28a745' : '#dc3545' }]} 
+                      onPress={() => handleTogglePermission(u, 'is_active')}
+                    >
+                      <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>
+                        {u.is_active ? '🟢 HABILITADO' : '🔴 INACTIVO'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
 
                 {u.role !== 'superadmin' && (
-                  <View style={{ flexDirection: 'column', alignItems: 'flex-end' }}>
-                    <TouchableOpacity 
-                      style={[styles.typeBtn, { padding: 6, marginBottom: 4, backgroundColor: u.is_active ? '#dc3545' : '#28a745' }]} 
-                      onPress={() => handleToggleUserActive(u)}
-                    >
-                      <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>
-                        {u.is_active ? 'Inhabilitar' : 'Habilitar'}
-                      </Text>
-                    </TouchableOpacity>
-
-                    {!u.is_cashier_active && (
-                      <TouchableOpacity style={[styles.buttonSuccess, { padding: 6 }]} onPress={() => handleSetCashier(u.id)}>
-                        <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>Asignar Caja</Text>
+                  <View style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 8 }}>
+                    <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 6 }}>
+                      Módulos Permitidos:
+                    </Text>
+                    
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <TouchableOpacity 
+                        style={[styles.badgeBtn, u.can_preventa && styles.badgeBtnActive]} 
+                        onPress={() => handleTogglePermission(u, 'can_preventa')}
+                      >
+                        <Text style={{ color: u.can_preventa ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>
+                          🛒 Pre-venta {u.can_preventa ? '✓' : '✗'}
+                        </Text>
                       </TouchableOpacity>
-                    )}
+
+                      <TouchableOpacity 
+                        style={[styles.badgeBtn, u.can_caja && styles.badgeBtnActive]} 
+                        onPress={() => handleTogglePermission(u, 'can_caja')}
+                      >
+                        <Text style={{ color: u.can_caja ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>
+                          💳 Caja {u.can_caja ? '✓' : '✗'}
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity 
+                        style={[styles.badgeBtn, u.can_stock && styles.badgeBtnActive]} 
+                        onPress={() => handleTogglePermission(u, 'can_stock')}
+                      >
+                        <Text style={{ color: u.can_stock ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>
+                          📦 Stock {u.can_stock ? '✓' : '✗'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 )}
               </View>
@@ -846,19 +856,21 @@ return (
         )}
       </View>
 
-      {/* NAVBAR NAVEGACIÓN BASADA EN PERMISOS */}
+      {/* NAVBAR CON MARGEN INFERIOR PARA BOTONES NATIVOS ANDROID */}
       <View style={styles.navbar}>
-        <TouchableOpacity style={[styles.navBtn, currentTab === 'preventa' && styles.navActive]} onPress={() => handleTabChange('preventa')}>
-          <Text style={styles.navText}>🛒 Pre-venta</Text>
-        </TouchableOpacity>
+        {(canPreventa || userRole === 'superadmin') && (
+          <TouchableOpacity style={[styles.navBtn, currentTab === 'preventa' && styles.navActive]} onPress={() => handleTabChange('preventa')}>
+            <Text style={styles.navText}>🛒 Pre-venta</Text>
+          </TouchableOpacity>
+        )}
 
-        {(isCashierActive || userRole === 'superadmin' || userRole === 'dueno') && (
+        {(canCaja || userRole === 'superadmin') && (
           <TouchableOpacity style={[styles.navBtn, currentTab === 'caja' && styles.navActive]} onPress={() => handleTabChange('caja')}>
             <Text style={styles.navText}>💳 Caja</Text>
           </TouchableOpacity>
         )}
 
-        {(userRole === 'superadmin' || userRole === 'dueno' || userRole === 'encargado') && (
+        {(canStock || userRole === 'superadmin') && (
           <TouchableOpacity style={[styles.navBtn, currentTab === 'inventario' && styles.navActive]} onPress={() => handleTabChange('inventario')}>
             <Text style={styles.navText}>📦 Stock</Text>
           </TouchableOpacity>
@@ -866,7 +878,7 @@ return (
 
         {(userRole === 'superadmin' || userRole === 'dueno') && (
           <TouchableOpacity style={[styles.navBtn, currentTab === 'usuarios' && styles.navActive]} onPress={() => handleTabChange('usuarios')}>
-            <Text style={styles.navText}>👥 Usuarios</Text>
+            <Text style={styles.navText}>👥 Permisos</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -879,14 +891,16 @@ const styles = StyleSheet.create({
   header: { backgroundColor: '#1a1a1a', padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   headerTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
   body: { flex: 1, backgroundColor: '#f4f6f8' },
-  scrollPadding: { padding: 15, paddingBottom: 30 },
+  scrollPadding: { padding: 15, paddingBottom: 40 },
   sectionTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 10 },
   subSectionTitle: { fontSize: 15, fontWeight: 'bold', marginTop: 15, marginBottom: 8, color: '#444' },
   input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ddd', padding: 12, borderRadius: 8, marginBottom: 10 },
   inputHighlight: { backgroundColor: '#fff', borderWidth: 2, borderColor: '#007bff', padding: 12, borderRadius: 8, fontSize: 16, fontWeight: 'bold', color: '#007bff' },
   inputSmall: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ccc', padding: 6, borderRadius: 6, width: 65, textAlign: 'center', fontWeight: 'bold' },
-  typeBtn: { flex: 1, padding: 10, borderWidth: 1, borderColor: '#ccc', borderRadius: 8, alignItems: 'center', backgroundColor: '#e9ecef' },
+  typeBtn: { flex: 1, padding: 8, borderWidth: 1, borderColor: '#ccc', borderRadius: 8, alignItems: 'center', backgroundColor: '#e9ecef' },
   typeBtnActive: { backgroundColor: '#007bff', borderColor: '#0056b3' },
+  badgeBtn: { flex: 0.31, padding: 8, borderWidth: 1, borderColor: '#ddd', borderRadius: 6, alignItems: 'center', backgroundColor: '#f8f9fa' },
+  badgeBtnActive: { backgroundColor: '#28a745', borderColor: '#1e7e34' },
   buttonPrimary: { backgroundColor: '#007bff', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 10 },
   buttonCamera: { backgroundColor: '#6f42c1', padding: 12, borderRadius: 8, alignItems: 'center', marginBottom: 10 },
   buttonSuccess: { backgroundColor: '#28a745', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 10 },
@@ -912,7 +926,14 @@ const styles = StyleSheet.create({
   emptyText: { color: '#888', fontStyle: 'italic' },
   loginCard: { backgroundColor: '#fff', margin: 20, padding: 20, borderRadius: 10 },
   appTitle: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 15 },
-  navbar: { flexDirection: 'row', backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#ddd', paddingBottom: Platform.OS === 'android' ? 24 : 10, paddingTop: 8 },
+  navbar: { 
+    flexDirection: 'row', 
+    backgroundColor: '#fff', 
+    borderTopWidth: 1, 
+    borderTopColor: '#ddd', 
+    paddingTop: 8,
+    paddingBottom: Platform.OS === 'android' ? 28 : 12
+  },
   navBtn: { flex: 1, padding: 8, alignItems: 'center' },
   navActive: { borderTopWidth: 3, borderTopColor: '#007bff' },
   navText: { color: '#444', fontWeight: 'bold', fontSize: 11 }
