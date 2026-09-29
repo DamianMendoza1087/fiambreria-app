@@ -112,3 +112,36 @@ export const finalizeSale = async (saleData) => {
   if (!res.ok) throw new Error("Error al procesar cobro");
   return await res.json();
 };
+
+// CAJA Y ARQUEO
+export const fetchCashSessionStatus = async () => {
+  const res = await fetch(`${API_URL}/cash/status`);
+  if (!res.ok) throw new Error("Error al consultar estado de caja");
+  return await res.json();
+};
+
+export const openCashSession = async (initialAmount, openedBy) => {
+  const res = await fetch(`${API_URL}/cash/open`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ initial_amount: initialAmount, opened_by: openedBy }),
+  });
+  if (!res.ok) throw new Error("Error al abrir caja");
+  return await res.json();
+};
+
+export const closeCashSession = async (reportedCash, closedBy, attemptNumber) => {
+  const res = await fetch(`${API_URL}/cash/close`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reported_cash: reportedCash, closed_by: closedBy, attempt_number: attemptNumber }),
+  });
+  if (!res.ok) throw new Error("Error al procesar el arqueo de caja");
+  return await res.json();
+};
+
+export const fetchCashAuditsByDate = async (dateStr) => {
+  const res = await fetch(`${API_URL}/cash/audits?date=${dateStr}`);
+  if (!res.ok) throw new Error("Error al consultar arqueos de caja");
+  return await res.json();
+};
