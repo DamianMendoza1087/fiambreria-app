@@ -61,19 +61,13 @@ export const createUser = async (userData) => {
   return await res.json();
 };
 
-export const updateUserStatus = async (userId, userData) => {
-  const res = await fetch(`${API_URL}/users/${userId}`, {
+export const updateUserPermissions = async (userId, permissions) => {
+  const res = await fetch(`${API_URL}/users/${userId}/permissions`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(userData),
+    body: JSON.stringify(permissions),
   });
-  if (!res.ok) throw new Error("Error al actualizar permisos de usuario");
-  return await res.json();
-};
-
-export const activateCashier = async (userId) => {
-  const res = await fetch(`${API_URL}/users/${userId}/activate-cashier`, { method: "PATCH" });
-  if (!res.ok) throw new Error("Error al asignar caja");
+  if (!res.ok) throw new Error("Error al actualizar permisos");
   return await res.json();
 };
 
