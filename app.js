@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { loginUser, fetchProducts, createProduct, deleteProduct, fetchUsers, createUser, activateCashier, createPreSale, fetchPendingPreSales, finalizeSale } from './api';
+import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, activateCashier, createPreSale, fetchPendingPreSales, finalizeSale } from './api';
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -11,8 +11,9 @@ export default function App() {
   const [password, setPassword] = useState('admin123');
   const [loading, setLoading] = useState(false);
 
-  // Inventario
+  // Inventario & Edición
   const [products, setProducts] = useState([]);
+  const [editingProductId, setEditingProductId] = useState(null);
   const [prodName, setProdName] = useState('');
   const [prodCategory, setProdCategory] = useState('Varios');
   const [prodPrice, setProdPrice] = useState('');
@@ -26,10 +27,8 @@ export default function App() {
   const [cameraTarget, setCameraTarget] = useState(null);
   const [scanned, setScanned] = useState(false);
 
-  // Pre-venta
+  // Pre-venta & Caja
   const [vendorCart, setVendorCart] = useState([]);
-
-  // Caja
   const [pendingPreSales, setPendingPreSales] = useState([]);
   const [selectedPreSaleId, setSelectedPreSaleId] = useState(null);
   const [cashierCart, setCashierCart] = useState([]);
@@ -46,25 +45,27 @@ export default function App() {
 
   const loadInitialData = async () => {
     try {
-      setLoading(true);
       setProducts(await fetchProducts());
       setUsersList(await fetchUsers());
       setPendingPreSales(await fetchPendingPreSales());
     } catch (e) {
-      alert('Error cargando datos: ' + e.message);
-    } finally {
-      setLoading(false);
+      console.log('Error de sincronización:', e.message);
     }
   };
 
+  // Sincronización automática periódica (Sondeo en tiempo real cada 5 seg)
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    loadInitialData();
+    const interval = setInterval(() => {
+      loadInitialData();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [isLoggedIn]);
+
   const handleTabChange = async (tabName) => {
     setCurrentTab(tabName);
-    if (tabName === 'caja' || tabName === 'preventa') {
-      try {
-        setPendingPreSales(await fetchPendingPreSales());
-        setProducts(await fetchProducts());
-      } catch (e) {}
-    }
+    await loadInitialData();
   };
 
   const handleLogin = async () => {
@@ -298,11 +299,27 @@ export default function App() {
     }
   };
 
-  const handleCreateProduct = async () => {
+  // --- LÓGICA DE ALTA Y EDICIÓN DE PRODUCTOS ---
+  const handleStartEditProduct = (prod) => {
+    setEditingProductId(prod.id);
+    setProdName(prod.name);
+    setProdCategory(prod.category || 'Varios');
+    setProdPrice(String(prod.price_per_unit));
+    setProdStock(String(prod.stock));
+    setProdUnitType(prod.unit_type || 'unid');
+    setProdBarcode(prod.barcode || '');
+  };
+
+  const handleCancelEditProduct = () => {
+    setEditingProductId(null);
+    setProdName(''); setProdPrice(''); setProdStock(''); setProdBarcode(''); setProdUnitType('unid');
+  };
+
+  const handleSaveProduct = async () => {
     if (!prodName || !prodPrice || !prodStock) return alert('Completá nombre, precio y stock');
     try {
       setLoading(true);
-      await createProduct({
+      const payload = {
         name: prodName,
         category: prodCategory,
         price_per_unit: parseFloat(prodPrice),
@@ -310,12 +327,20 @@ export default function App() {
         stock: parseFloat(prodStock),
         barcode: prodBarcode || null,
         is_active: true
-      });
-      setProdName(''); setProdPrice(''); setProdStock(''); setProdBarcode('');
+      };
+
+      if (editingProductId) {
+        await updateProduct(editingProductId, payload);
+        alert('✅ Producto actualizado correctamente');
+      } else {
+        await createProduct(payload);
+        alert('✅ Producto guardado en el catálogo');
+      }
+
+      handleCancelEditProduct();
       await loadInitialData();
-      alert('Producto guardado en el catálogo');
     } catch (e) {
-      alert('Error al guardar producto');
+      alert('Error al guardar/actualizar producto');
     } finally {
       setLoading(false);
     }
@@ -534,12 +559,14 @@ return (
           </ScrollView>
         )}
 
-        {/* INVENTARIO COMPLETO */}
+        {/* INVENTARIO COMPLETO (CON EDITAR PRODUCTO) */}
         {currentTab === 'inventario' && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>📦 Control de Inventario</Text>
             <View style={styles.card}>
-              <Text style={styles.subSectionTitle}>Nuevo Producto</Text>
+              <Text style={styles.subSectionTitle}>
+                {editingProductId ? '✏️ Editar Producto' : '➕ Nuevo Producto'}
+              </Text>
               <TextInput style={styles.input} placeholder="Nombre del Producto" value={prodName} onChangeText={setProdName} />
               <TextInput style={styles.input} placeholder="Categoría (ej: Fiambres, Quesos, Cosmética)" value={prodCategory} onChangeText={setProdCategory} />
               
@@ -576,9 +603,17 @@ return (
                 </View>
               )}
 
-              <TouchableOpacity style={[styles.buttonPrimary, { marginTop: 15 }]} onPress={handleCreateProduct} disabled={loading}>
-                <Text style={styles.buttonText}>+ Guardar Producto</Text>
+              <TouchableOpacity style={[styles.buttonPrimary, { marginTop: 15 }]} onPress={handleSaveProduct} disabled={loading}>
+                <Text style={styles.buttonText}>
+                  {editingProductId ? '💾 Guardar Cambios' : '+ Guardar Producto'}
+                </Text>
               </TouchableOpacity>
+
+              {editingProductId && (
+                <TouchableOpacity style={[styles.buttonDanger, { marginTop: 8, backgroundColor: '#6c757d' }]} onPress={handleCancelEditProduct}>
+                  <Text style={styles.buttonText}>Cancelar Edición</Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             <Text style={styles.subSectionTitle}>Catálogo Registrado</Text>
@@ -590,9 +625,14 @@ return (
                     <Text style={{ color: '#28a745', fontWeight: '600' }}>${p.price_per_unit} / {p.unit_type}</Text>
                     <Text style={{ color: '#666', fontSize: 12 }}>Stock: {p.stock} {p.unit_type} | EAN: {p.barcode || 'Sin EAN'}</Text>
                   </View>
-                  <TouchableOpacity style={styles.buttonDanger} onPress={() => handleDeleteProduct(p.id)}>
-                    <Text style={styles.buttonText}>Eliminar</Text>
-                  </TouchableOpacity>
+                  <View style={{ flexDirection: 'row' }}>
+                    <TouchableOpacity style={[styles.buttonPrimary, { padding: 8, marginRight: 6 }]} onPress={() => handleStartEditProduct(p)}>
+                      <Text style={styles.buttonText}>✏️ Editar</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.buttonDanger} onPress={() => handleDeleteProduct(p.id)}>
+                      <Text style={styles.buttonText}>Eliminar</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               ))
             )}
@@ -661,7 +701,7 @@ const styles = StyleSheet.create({
   inputSmall: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ccc', padding: 6, borderRadius: 6, width: 50, textAlign: 'center', fontWeight: 'bold' },
   typeBtn: { flex: 1, padding: 10, borderWidth: 1, borderColor: '#ccc', borderRadius: 8, alignItems: 'center', backgroundColor: '#e9ecef' },
   typeBtnActive: { backgroundColor: '#007bff', borderColor: '#0056b3' },
-  buttonPrimary: { backgroundColor: '#007bff', padding: 14, borderRadius: 8, alignItems: 'center', marginTop: 10 },
+  buttonPrimary: { backgroundColor: '#007bff', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 10 },
   buttonCamera: { backgroundColor: '#6f42c1', padding: 12, borderRadius: 8, alignItems: 'center', marginBottom: 10 },
   buttonSuccess: { backgroundColor: '#28a745', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 10 },
   buttonDanger: { backgroundColor: '#dc3545', padding: 8, borderRadius: 6 },
