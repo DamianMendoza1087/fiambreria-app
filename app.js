@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { loginUser, fetchProducts, createProduct, deleteProduct, fetchUsers, createUser, activateCashier, processSale } from './api';
 
@@ -63,7 +63,6 @@ export default function App() {
     }
   };
 
-  // Manejo Seguro de Permisos de Cámara en Android
   const toggleCamera = async () => {
     if (!permission?.granted) {
       const res = await requestPermission();
@@ -89,7 +88,6 @@ export default function App() {
     setTimeout(() => setScanned(false), 2000);
   };
 
-  // Carrito / Caja
   const addToCart = (product) => {
     const existing = cart.find(item => item.id === product.id);
     if (existing) {
@@ -122,7 +120,6 @@ export default function App() {
     }
   };
 
-  // Inventario
   const handleCreateProduct = async () => {
     if (!name || !price || !stock) return alert('Completá nombre, precio y stock');
     try {
@@ -158,7 +155,6 @@ export default function App() {
     }
   };
 
-  // Usuarios
   const handleCreateUser = async () => {
     if (!newUserName || !newUserEmail || !newUserPass) return alert('Completá los datos');
     try {
@@ -189,7 +185,7 @@ export default function App() {
 
   if (!isLoggedIn) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.safeArea}>
         <View style={styles.loginCard}>
           <Text style={styles.appTitle}>🍖 Fiambrería Admin</Text>
           <Text style={styles.subtitle}>Iniciar Sesión</Text>
@@ -204,7 +200,7 @@ export default function App() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>🍖 Fiambrería POS</Text>
         <TouchableOpacity onPress={loadInitialData}>
@@ -217,7 +213,6 @@ export default function App() {
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>🛒 Punto de Venta (Caja)</Text>
 
-            {/* Botón Lector de Cámara */}
             <TouchableOpacity style={styles.buttonCamera} onPress={toggleCamera}>
               <Text style={styles.buttonText}>{showCamera ? '📷 Cerrar Cámara' : '📷 Escanear con Cámara'}</Text>
             </TouchableOpacity>
@@ -346,6 +341,7 @@ export default function App() {
         )}
       </View>
 
+      {/* Menú de Navegación Inferior corregido con margen para botones Android */}
       <View style={styles.navbar}>
         <TouchableOpacity style={[styles.navButton, currentTab === 'caja' && styles.navActive]} onPress={() => setCurrentTab('caja')}>
           <Text style={[styles.navText, currentTab === 'caja' && styles.navActiveText]}>🛒 Caja</Text>
@@ -364,6 +360,11 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
+  safeArea: { 
+    flex: 1, 
+    backgroundColor: '#1a1a1a', 
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight || 25 : 0 
+  },
   container: { flex: 1, backgroundColor: '#f4f6f8' },
   loginCard: { backgroundColor: '#fff', margin: 20, padding: 25, borderRadius: 12, elevation: 3 },
   appTitle: { fontSize: 26, fontWeight: 'bold', textAlign: 'center', color: '#333', marginBottom: 10 },
@@ -371,8 +372,8 @@ const styles = StyleSheet.create({
   header: { backgroundColor: '#1a1a1a', padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   headerTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
   refreshText: { color: '#007bff', fontSize: 14 },
-  body: { flex: 1 },
-  scrollPadding: { padding: 15 },
+  body: { flex: 1, backgroundColor: '#f4f6f8' },
+  scrollPadding: { padding: 15, paddingBottom: 30 },
   sectionTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 15, color: '#222' },
   subSectionTitle: { fontSize: 16, fontWeight: 'bold', marginTop: 15, marginBottom: 10, color: '#555' },
   input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ddd', padding: 12, borderRadius: 8, marginBottom: 10 },
@@ -401,8 +402,15 @@ const styles = StyleSheet.create({
   productName: { fontWeight: 'bold', fontSize: 15 },
   productDetail: { color: '#666', fontSize: 13 },
   emptyText: { color: '#888', fontStyle: 'italic', marginVertical: 10 },
-  navbar: { flexDirection: 'row', backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#ddd' },
-  navButton: { flex: 1, padding: 15, alignItems: 'center' },
+  navbar: { 
+    flexDirection: 'row', 
+    backgroundColor: '#fff', 
+    borderTopWidth: 1, 
+    borderTopColor: '#ddd',
+    paddingBottom: Platform.OS === 'android' ? 24 : 10, 
+    paddingTop: 8 
+  },
+  navButton: { flex: 1, padding: 8, alignItems: 'center' },
   navActive: { borderTopWidth: 3, borderTopColor: '#007bff' },
   navText: { color: '#666', fontWeight: '600', fontSize: 12 },
   navActiveText: { color: '#007bff', fontWeight: 'bold' }
