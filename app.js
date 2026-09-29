@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar, Alert } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import * as Print from 'expo-print';
-import { shareAsync } from 'expo-sharing';
 import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale } from './api';
 
 export default function App() {
@@ -198,61 +196,6 @@ export default function App() {
     }
   };
 
-  // Exportar Listado de Stock Completo a PDF
-  const handleExportPDF = async () => {
-    try {
-      const rows = products.map((p, index) => `
-        <tr style="background-color: ${index % 2 === 0 ? '#ffffff' : '#f9f9f9'};">
-          <td style="padding: 8px; border: 1px solid #ddd;">${p.name}</td>
-          <td style="padding: 8px; border: 1px solid #ddd;">${p.category || 'Varios'}</td>
-          <td style="padding: 8px; border: 1px solid #ddd;">$${p.price_per_unit} / ${p.unit_type}</td>
-          <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold; color: ${p.stock <= 2 ? '#dc3545' : '#000'};">${p.stock} ${p.unit_type}</td>
-          <td style="padding: 8px; border: 1px solid #ddd;">${p.last_counted_qty !== null && p.last_counted_qty !== undefined ? `${p.last_counted_qty} ${p.unit_type} (${p.last_counted_by || ''})` : 'Sin auditar'}</td>
-          <td style="padding: 8px; border: 1px solid #ddd;">${p.barcode || '-'}</td>
-        </tr>
-      `).join('');
-
-      const htmlContent = `
-        <html>
-          <head>
-            <meta charset="utf-8">
-            <style>
-              body { font-family: Helvetica, Arial, sans-serif; padding: 20px; }
-              h1 { text-align: center; color: #1a1a1a; margin-bottom: 5px; }
-              p { text-align: center; color: #666; font-size: 12px; margin-bottom: 20px; }
-              table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
-              th { background-color: #007bff; color: white; padding: 10px; border: 1px solid #ddd; text-align: left; }
-            </style>
-          </head>
-          <body>
-            <h1>🍖 Fiambrería POS - Reporte General de Stock</h1>
-            <p>Fecha de emisión: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}</p>
-            <table>
-              <thead>
-                <tr>
-                  <th>Producto</th>
-                  <th>Categoría</th>
-                  <th>Precio</th>
-                  <th>Stock Sistema</th>
-                  <th>Último Conteo Físico</th>
-                  <th>Código EAN</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${rows}
-              </tbody>
-            </table>
-          </body>
-        </html>
-      `;
-
-      const { uri } = await Print.printToFileAsync({ html: htmlContent });
-      await shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-    } catch (e) {
-      alert('Error generando PDF: ' + e.message);
-    }
-  };
-
   // Carrito Vendor
   const addToVendorCart = (prod) => {
     const existing = vendorCart.find(i => i.id === prod.id);
@@ -367,7 +310,7 @@ export default function App() {
         const maxStock = prod ? prod.stock : 999;
 
         if (newQty > maxStock) {
-          alert(`⚠️️ No podés superar el stock disponible (${maxStock} ${item.unit_type})`);
+          alert(`⚠️ No podés superar el stock disponible (${maxStock} ${item.unit_type})`);
           return item;
         }
         return newQty > 0 ? { ...item, qty: newQty } : null;
@@ -568,7 +511,38 @@ export default function App() {
       setLoading(false);
     }
   };
-  const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.filter(p => p.name.toLowerCase().includes(searchQueryVendor.toLowerCase()));
+
+  if (!isLoggedIn) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.loginCard}>
+          <Text style={styles.appTitle}>🍖 Fiambrería POS</Text>
+          <TextInput style={styles.input} placeholder="Correo Electrónico" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
+          <TextInput style={styles.input} placeholder="Contraseña" secureTextEntry value={password} onChangeText={setPassword} />
+          <TouchableOpacity style={styles.buttonPrimary} onPress={handleLogin} disabled={loading}>
+            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Ingresar</Text>}
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!isAccountActive && userRole !== 'superadmin') {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.loginCard}>
+          <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#dc3545', textAlign: 'center', marginBottom: 10 }}>🔒 Cuenta Inactiva</Text>
+          <Text style={{ textAlign: 'center', color: '#555', marginBottom: 20 }}>
+            Tu usuario aún no ha sido habilitado por el Administrador.
+          </Text>
+          <TouchableOpacity style={styles.buttonDanger} onPress={handleLogout}>
+            <Text style={styles.buttonText}>Cerrar Sesión</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.filter(p => p.name.toLowerCase().includes(searchQueryVendor.toLowerCase()));
   const filteredProductsCashier = searchQueryCashier.trim() === '' ? [] : products.filter(p => p.name.toLowerCase().includes(searchQueryCashier.toLowerCase()));
   const filteredProductsStock = searchQueryStock.trim() === '' ? [] : products.filter(p => p.name.toLowerCase().includes(searchQueryStock.toLowerCase()) || (p.barcode && p.barcode.includes(searchQueryStock)));
 
@@ -807,17 +781,10 @@ export default function App() {
           </ScrollView>
         )}
 
-        {/* MÓDULO 3: AUDITORÍA Y CONTROL DE STOCK (A CIEGAS & REPORTES) */}
+        {/* MÓDULO 3: AUDITORÍA Y CONTROL DE STOCK (A CIEGAS) */}
         {currentTab === 'inventario' && (canStock || userRole === 'superadmin') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>📦 Auditoría y Control de Inventario</Text>
-
-            {/* VISTA Y BOTÓN DE IMPRESIÓN EXCLUSIVO SUPERADMIN / DUEÑO */}
-            {(userRole === 'superadmin' || userRole === 'dueno') && (
-              <TouchableOpacity style={[styles.buttonPrimary, { backgroundColor: '#17a2b8', marginBottom: 15 }]} onPress={handleExportPDF}>
-                <Text style={styles.buttonText}>📄 Exportar Reporte de Stock Completo en PDF</Text>
-              </TouchableOpacity>
-            )}
 
             {/* SECCIÓN OPERARIO: CONTEO A CIEGAS */}
             <View style={styles.card}>
@@ -898,7 +865,7 @@ export default function App() {
           </ScrollView>
         )}
 
-        {/* INRESOS */}
+        {/* INGRESOS */}
         {currentTab === 'ingresos' && (canIngreso || userRole === 'superadmin' || userRole === 'dueno') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>📥 Ingreso de Materiales y Catálogo</Text>
