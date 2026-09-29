@@ -1,12 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator } from 'react-native';
-import { loginUser, fetchProducts, createProduct, deleteProduct, fetchUsers, createUser, activateCashier } from './api';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import { loginUser, fetchProducts, createProduct, deleteProduct, fetchUsers, createUser, activateCashier, processSale } from './api';
 
 export default function App() {
-  // Estado de Sesión y Navegación
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userRole, setUserRole] = useState('superadmin');
-  const [currentTab, setCurrentTab] = useState('caja'); // 'caja' | 'inventario' | 'usuarios'
+  const [currentTab, setCurrentTab] = useState('caja'); 
   const [email, setEmail] = useState('admin@fiambreria.com');
   const [password, setPassword] = useState('admin123');
   const [loading, setLoading] = useState(false);
@@ -14,19 +14,27 @@ export default function App() {
   // Estados de Inventario y Caja
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
+  const [paymentMethod, setPaymentMethod] = useState('Efectivo');
+  
+  // Estados de Cámara
+  const [permission, requestPermission] = useCameraPermissions();
+  const [showCamera, setShowCamera] = useState(false);
+  const [scanned, setScanned] = useState(false);
+
+  // Estados Formulario Producto
   const [name, setName] = useState('');
   const [category, setCategory] = useState('Fiambres');
   const [price, setPrice] = useState('');
   const [stock, setStock] = useState('');
+  const [barcode, setBarcode] = useState('');
 
-  // Estados de Usuarios
+  // Estados Usuarios
   const [usersList, setUsersList] = useState([]);
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPass, setNewUserPass] = useState('');
   const [newUserRole, setNewUserRole] = useState('cajero');
 
-  // Cargar datos
   const loadInitialData = async () => {
     try {
       setLoading(true);
@@ -41,7 +49,6 @@ export default function App() {
     }
   };
 
-  // Manejar Login
   const handleLogin = async () => {
     try {
       setLoading(true);
@@ -56,6 +63,21 @@ export default function App() {
     }
   };
 
+  // Escáner de Código de Barras
+  const handleBarcodeScanned = ({ data }) => {
+    setScanned(true);
+    setShowCamera(false);
+    const foundProduct = products.find(p => p.barcode === data);
+    
+    if (foundProduct) {
+      addToCart(foundProduct);
+      alert(`Producto agregado: ${foundProduct.name}`);
+    } else {
+      alert(`Código ${data} no encontrado en el catálogo.`);
+    }
+    setTimeout(() => setScanned(false), 2000);
+  };
+
   // Carrito / Caja
   const addToCart = (product) => {
     const existing = cart.find(item => item.id === product.id);
@@ -67,13 +89,26 @@ export default function App() {
   };
 
   const removeFromCart = (id) => setCart(cart.filter(item => item.id !== id));
-
   const getTotalPrice = () => cart.reduce((total, item) => total + (item.price_per_unit * item.qty), 0).toFixed(2);
 
-  const handleCheckout = () => {
+  const handleCheckout = async () => {
     if (cart.length === 0) return alert('El carrito está vacío');
-    alert(`¡Venta Cobrada con Éxito!\nTotal: $${getTotalPrice()}`);
-    setCart([]);
+    try {
+      setLoading(true);
+      const salePayload = {
+        total_amount: parseFloat(getTotalPrice()),
+        payment_method: paymentMethod,
+        items: cart.map(i => ({ product_id: i.id, quantity: i.qty }))
+      };
+      await processSale(salePayload);
+      alert(`¡Venta Registrada con Éxito!\nTotal: $${getTotalPrice()}\nPago: ${paymentMethod}`);
+      setCart([]);
+      await loadInitialData();
+    } catch (error) {
+      alert('Error al procesar cobro: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Inventario
@@ -87,9 +122,10 @@ export default function App() {
         price_per_unit: parseFloat(price),
         unit_type: 'kg',
         stock: parseFloat(stock),
+        barcode: barcode || null,
         is_active: true,
       });
-      setName(''); setPrice(''); setStock('');
+      setName(''); setPrice(''); setStock(''); setBarcode('');
       await loadInitialData();
       alert('Producto guardado');
     } catch (error) {
@@ -113,18 +149,13 @@ export default function App() {
 
   // Usuarios
   const handleCreateUser = async () => {
-    if (!newUserName || !newUserEmail || !newUserPass) return alert('Completá los datos del usuario');
+    if (!newUserName || !newUserEmail || !newUserPass) return alert('Completá los datos');
     try {
       setLoading(true);
-      await createUser({
-        name: newUserName,
-        email: newUserEmail,
-        password: newUserPass,
-        role: newUserRole,
-      });
+      await createUser({ name: newUserName, email: newUserEmail, password: newUserPass, role: newUserRole });
       setNewUserName(''); setNewUserEmail(''); setNewUserPass('');
       await loadInitialData();
-      alert('Usuario creado con éxito');
+      alert('Usuario creado');
     } catch (error) {
       alert('Error al crear usuario');
     } finally {
@@ -137,7 +168,7 @@ export default function App() {
       setLoading(true);
       await activateCashier(userId);
       await loadInitialData();
-      alert('Turno de Caja asignado correctamente');
+      alert('Caja asignada');
     } catch (error) {
       alert('Error al asignar caja');
     } finally {
@@ -174,7 +205,26 @@ export default function App() {
         {currentTab === 'caja' && (
           <ScrollView contentContainerStyle={styles.scrollPadding}>
             <Text style={styles.sectionTitle}>🛒 Punto de Venta (Caja)</Text>
-            <Text style={styles.subSectionTitle}>Productos Disponibles:</Text>
+
+            {/* Lector de Cámara */}
+            <TouchableOpacity style={styles.buttonCamera} onPress={() => {
+              if (!permission?.granted) requestPermission();
+              setShowCamera(!showCamera);
+            }}>
+              <Text style={styles.buttonText}>{showCamera ? '📷 Cerrar Cámara' : '📷 Abrir Escáner Cámara'}</Text>
+            </TouchableOpacity>
+
+            {showCamera && (
+              <View style={styles.cameraContainer}>
+                <CameraView
+                  style={StyleSheet.absoluteFillObject}
+                  facing="back"
+                  onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
+                />
+              </View>
+            )}
+
+            <Text style={styles.subSectionTitle}>Botones Rápidos / Productos:</Text>
             <View style={styles.gridContainer}>
               {products.map(item => (
                 <TouchableOpacity key={item.id} style={styles.gridCard} onPress={() => addToCart(item)}>
@@ -185,7 +235,7 @@ export default function App() {
               ))}
             </View>
 
-            <Text style={styles.subSectionTitle}>Ticket Actual:</Text>
+            <Text style={styles.subSectionTitle}>Ticket de Venta Actual:</Text>
             {cart.length === 0 ? (
               <Text style={styles.emptyText}>Carrito vacío.</Text>
             ) : (
@@ -203,12 +253,23 @@ export default function App() {
               ))
             )}
 
+            {/* Forma de Pago */}
+            <Text style={styles.subSectionTitle}>Método de Pago:</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
+              <TouchableOpacity style={[styles.payMethodBtn, paymentMethod === 'Efectivo' && styles.payMethodActive]} onPress={() => setPaymentMethod('Efectivo')}>
+                <Text style={styles.buttonText}>💵 Efectivo</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.payMethodBtn, paymentMethod === 'Mercado Pago' && styles.payMethodActive]} onPress={() => setPaymentMethod('Mercado Pago')}>
+                <Text style={styles.buttonText}>📱 Mercado Pago</Text>
+              </TouchableOpacity>
+            </View>
+
             <View style={styles.totalBox}>
               <Text style={styles.totalLabel}>TOTAL:</Text>
               <Text style={styles.totalAmount}>${getTotalPrice()}</Text>
             </View>
-            <TouchableOpacity style={styles.buttonSuccess} onPress={handleCheckout}>
-              <Text style={styles.buttonText}>💳 Cobrar Venta</Text>
+            <TouchableOpacity style={styles.buttonSuccess} onPress={handleCheckout} disabled={loading}>
+              <Text style={styles.buttonText}>💳 Confirmar y Cobrar Venta</Text>
             </TouchableOpacity>
           </ScrollView>
         )}
@@ -218,16 +279,17 @@ export default function App() {
             <Text style={styles.sectionTitle}>📦 Control de Inventario</Text>
             <View style={styles.card}>
               <Text style={styles.subSectionTitle}>Nuevo Producto</Text>
-              <TextInput style={styles.input} placeholder="Nombre" value={name} onChangeText={setName} />
+              <TextInput style={styles.input} placeholder="Nombre del Producto" value={name} onChangeText={setName} />
               <TextInput style={styles.input} placeholder="Categoría" value={category} onChangeText={setCategory} />
               <TextInput style={styles.input} placeholder="Precio x kg/un" keyboardType="numeric" value={price} onChangeText={setPrice} />
               <TextInput style={styles.input} placeholder="Stock" keyboardType="numeric" value={stock} onChangeText={setStock} />
+              <TextInput style={styles.input} placeholder="Código de Barras (opcional)" value={barcode} onChangeText={setBarcode} />
               <TouchableOpacity style={styles.buttonPrimary} onPress={handleCreateProduct}>
                 <Text style={styles.buttonText}>+ Guardar Producto</Text>
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.subSectionTitle}>Catálogo</Text>
+            <Text style={styles.subSectionTitle}>Catálogo Registrado</Text>
             {products.map((item) => (
               <View key={item.id} style={styles.productCard}>
                 <View>
@@ -309,9 +371,11 @@ const styles = StyleSheet.create({
   subSectionTitle: { fontSize: 16, fontWeight: 'bold', marginTop: 15, marginBottom: 10, color: '#555' },
   input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ddd', padding: 12, borderRadius: 8, marginBottom: 10 },
   buttonPrimary: { backgroundColor: '#007bff', padding: 14, borderRadius: 8, alignItems: 'center' },
-  buttonSuccess: { backgroundColor: '#28a745', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 5 },
+  buttonCamera: { backgroundColor: '#6f42c1', padding: 14, borderRadius: 8, alignItems: 'center', marginBottom: 10 },
+  buttonSuccess: { backgroundColor: '#28a745', padding: 14, borderRadius: 8, alignItems: 'center', marginTop: 5 },
   buttonDanger: { backgroundColor: '#dc3545', padding: 8, borderRadius: 6 },
   buttonText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
+  cameraContainer: { height: 200, borderRadius: 10, overflow: 'hidden', marginBottom: 15 },
   gridContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
   gridCard: { backgroundColor: '#fff', width: '48%', padding: 12, borderRadius: 8, marginBottom: 10, borderWidth: 1, borderColor: '#e2e8f0' },
   gridTitle: { fontWeight: 'bold', fontSize: 14 },
@@ -324,6 +388,8 @@ const styles = StyleSheet.create({
   totalBox: { backgroundColor: '#fff', padding: 15, borderRadius: 8, flexDirection: 'row', justifyContent: 'space-between', marginTop: 15, borderTopWidth: 2, borderTopColor: '#28a745' },
   totalLabel: { fontSize: 18, fontWeight: 'bold' },
   totalAmount: { fontSize: 22, fontWeight: 'bold', color: '#28a745' },
+  payMethodBtn: { flex: 0.48, padding: 12, backgroundColor: '#6c757d', borderRadius: 8, alignItems: 'center' },
+  payMethodActive: { backgroundColor: '#007bff' },
   card: { backgroundColor: '#fff', padding: 15, borderRadius: 10, marginBottom: 15 },
   productCard: { backgroundColor: '#fff', padding: 12, borderRadius: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   productName: { fontWeight: 'bold', fontSize: 15 },
