@@ -6,31 +6,39 @@ import { loginUser, fetchProducts, createProduct, deleteProduct, fetchUsers, cre
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userRole, setUserRole] = useState('superadmin');
-  const [currentTab, setCurrentTab] = useState('preventa'); // 'preventa' | 'caja' | 'inventario' | 'usuarios'
+  const [currentTab, setCurrentTab] = useState('preventa');
   const [email, setEmail] = useState('admin@fiambreria.com');
   const [password, setPassword] = useState('admin123');
   const [loading, setLoading] = useState(false);
 
-  // Inventario y Productos
+  // Inventario
   const [products, setProducts] = useState([]);
-  
-  // Pre-venta (Vendedor)
+  const [prodName, setProdName] = useState('');
+  const [prodCategory, setProdCategory] = useState('Fiambres');
+  const [prodPrice, setProdPrice] = useState('');
+  const [prodStock, setProdStock] = useState('');
+  const [prodBarcode, setProdBarcode] = useState('');
+
+  // Pre-venta
   const [vendorCart, setVendorCart] = useState([]);
   const [permission, requestPermission] = useCameraPermissions();
   const [showCamera, setShowCamera] = useState(false);
+  const [scanned, setScanned] = useState(false);
 
-  // Caja (Cajero)
+  // Caja
   const [pendingPreSales, setPendingPreSales] = useState([]);
   const [selectedPreSaleId, setSelectedPreSaleId] = useState(null);
   const [cashierCart, setCashierCart] = useState([]);
-  const [paymentMethod, setPaymentMethod] = useState('Efectivo'); // 'Efectivo', 'Mercado Pago', 'Mixto'
+  const [paymentMethod, setPaymentMethod] = useState('Efectivo');
   const [amountCash, setAmountCash] = useState('');
   const [amountMP, setAmountMP] = useState('');
 
-  // Formulario Producto y Usuarios
-  const [name, setName] = useState(''); const [price, setPrice] = useState(''); const [stock, setStock] = useState('');
+  // Usuarios
   const [usersList, setUsersList] = useState([]);
-  const [newUserName, setNewUserName] = useState(''); const [newUserEmail, setNewUserEmail] = useState(''); const [newUserPass, setNewUserPass] = useState(''); const [newUserRole, setNewUserRole] = useState('cajero');
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserPass, setNewUserPass] = useState('');
+  const [newUserRole, setNewUserRole] = useState('cajero');
 
   const loadInitialData = async () => {
     try {
@@ -59,7 +67,31 @@ export default function App() {
     }
   };
 
-  // --- LÓGICA PRE-VENTA ---
+  const toggleCamera = async () => {
+    if (!permission?.granted) {
+      const res = await requestPermission();
+      if (!res.granted) {
+        alert('Se requieren permisos de cámara para escanear.');
+        return;
+      }
+    }
+    setShowCamera(!showCamera);
+  };
+
+  const handleBarcodeScanned = ({ data }) => {
+    setScanned(true);
+    setShowCamera(false);
+    const foundProduct = products.find(p => p.barcode === data);
+    
+    if (foundProduct) {
+      addToVendorCart(foundProduct);
+      alert(`Producto agregado: ${foundProduct.name}`);
+    } else {
+      alert(`Código ${data} no encontrado en el catálogo.`);
+    }
+    setTimeout(() => setScanned(false), 2000);
+  };
+
   const addToVendorCart = (prod) => {
     const existing = vendorCart.find(i => i.id === prod.id);
     if (existing) {
@@ -85,7 +117,6 @@ export default function App() {
     }
   };
 
-  // --- LÓGICA CAJA / COBRO ---
   const handleSelectPreSale = (ps) => {
     setSelectedPreSaleId(ps.id);
     setCashierCart(ps.items.map(i => ({ id: i.product_id, name: i.name, price_per_unit: i.price_per_unit, qty: i.qty })));
@@ -149,6 +180,69 @@ export default function App() {
     }
   };
 
+  const handleCreateProduct = async () => {
+    if (!prodName || !prodPrice || !prodStock) return alert('Completá nombre, precio y stock');
+    try {
+      setLoading(true);
+      await createProduct({
+        name: prodName,
+        category: prodCategory,
+        price_per_unit: parseFloat(prodPrice),
+        unit_type: 'kg',
+        stock: parseFloat(prodStock),
+        barcode: prodBarcode || null,
+        is_active: true
+      });
+      setProdName(''); setProdPrice(''); setProdStock(''); setProdBarcode('');
+      await loadInitialData();
+      alert('Producto guardado en el catálogo');
+    } catch (e) {
+      alert('Error al guardar producto');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteProduct = async (id) => {
+    try {
+      setLoading(true);
+      await deleteProduct(id);
+      await loadInitialData();
+    } catch (e) {
+      alert('Error al eliminar');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateUser = async () => {
+    if (!newUserName || !newUserEmail || !newUserPass) return alert('Completá los datos del usuario');
+    try {
+      setLoading(true);
+      await createUser({ name: newUserName, email: newUserEmail, password: newUserPass, role: newUserRole });
+      setNewUserName(''); setNewUserEmail(''); setNewUserPass('');
+      await loadInitialData();
+      alert('Usuario creado con éxito');
+    } catch (e) {
+      alert('Error al registrar usuario');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSetCashier = async (userId) => {
+    try {
+      setLoading(true);
+      await activateCashier(userId);
+      await loadInitialData();
+      alert('Caja asignada correctamente');
+    } catch (e) {
+      alert('Error al asignar caja');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (!isLoggedIn) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -163,8 +257,7 @@ export default function App() {
       </SafeAreaView>
     );
   }
-
-  return (
+return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>🍖 Fiambrería POS</Text>
@@ -172,11 +265,25 @@ export default function App() {
       </View>
 
       <View style={styles.body}>
-        {/* PESTAÑA PRE-VENTA (Vendedor) */}
+        {/* PRE-VENTA */}
         {currentTab === 'preventa' && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>🛒 Armar Pre-venta (Mostrador)</Text>
             
+            <TouchableOpacity style={styles.buttonCamera} onPress={toggleCamera}>
+              <Text style={styles.buttonText}>{showCamera ? '📷 Cerrar Cámara' : '📷 Escanear con Cámara'}</Text>
+            </TouchableOpacity>
+
+            {showCamera && permission?.granted && (
+              <View style={styles.cameraContainer}>
+                <CameraView
+                  style={StyleSheet.absoluteFillObject}
+                  facing="back"
+                  onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
+                />
+              </View>
+            )}
+
             <Text style={styles.subSectionTitle}>Productos Disponibles:</Text>
             <View style={styles.gridContainer}>
               {products.map(p => (
@@ -204,7 +311,7 @@ export default function App() {
           </ScrollView>
         )}
 
-        {/* PESTAÑA CAJA / COBRO (Cajero) */}
+        {/* CAJA */}
         {currentTab === 'caja' && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>💳 Caja y Cobro</Text>
@@ -274,32 +381,77 @@ export default function App() {
           </ScrollView>
         )}
 
-        {/* PESTAÑA INVENTARIO */}
+        {/* INVENTARIO COMPLETO */}
         {currentTab === 'inventario' && (
-          <ScrollView contentContainerStyle={styles.scrollPadding}>
-            <Text style={styles.sectionTitle}>📦 Inventario</Text>
-            {products.map(p => (
-              <View key={p.id} style={styles.productCard}>
-                <Text style={{ fontWeight: 'bold' }}>{p.name} - Stock: {p.stock} kg/un</Text>
-                <Text style={{ color: '#28a745' }}>${p.price_per_unit}</Text>
-              </View>
-            ))}
+          <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
+            <Text style={styles.sectionTitle}>📦 Control de Inventario</Text>
+            <View style={styles.card}>
+              <Text style={styles.subSectionTitle}>Nuevo Producto</Text>
+              <TextInput style={styles.input} placeholder="Nombre del Producto" value={prodName} onChangeText={setProdName} />
+              <TextInput style={styles.input} placeholder="Categoría (ej: Fiambres, Quesos)" value={prodCategory} onChangeText={setProdCategory} />
+              <TextInput style={styles.input} placeholder="Precio x kg / Unidad ($)" keyboardType="numeric" value={prodPrice} onChangeText={setProdPrice} />
+              <TextInput style={styles.input} placeholder="Stock Inicial" keyboardType="numeric" value={prodStock} onChangeText={setProdStock} />
+              <TextInput style={styles.input} placeholder="Código de Barras EAN (opcional)" value={prodBarcode} onChangeText={setProdBarcode} />
+              <TouchableOpacity style={styles.buttonPrimary} onPress={handleCreateProduct} disabled={loading}>
+                <Text style={styles.buttonText}>+ Guardar Producto</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.subSectionTitle}>Catálogo Registrado</Text>
+            {products.length === 0 ? <Text style={styles.emptyText}>No hay productos en el inventario.</Text> : (
+              products.map(p => (
+                <View key={p.id} style={styles.productCard}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontWeight: 'bold', fontSize: 15 }}>{p.name}</Text>
+                    <Text style={{ color: '#28a745', fontWeight: '600' }}>${p.price_per_unit} / {p.unit_type}</Text>
+                    <Text style={{ color: '#666', fontSize: 12 }}>Stock: {p.stock} {p.unit_type} | EAN: {p.barcode || 'Sin EAN'}</Text>
+                  </View>
+                  <TouchableOpacity style={styles.buttonDanger} onPress={() => handleDeleteProduct(p.id)}>
+                    <Text style={styles.buttonText}>Eliminar</Text>
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
           </ScrollView>
         )}
 
-        {/* PESTAÑA USUARIOS */}
+        {/* USUARIOS COMPLETO */}
         {currentTab === 'usuarios' && (
-          <ScrollView contentContainerStyle={styles.scrollPadding}>
-            <Text style={styles.sectionTitle}>👥 Personal</Text>
+          <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
+            <Text style={styles.sectionTitle}>👥 Gestión de Personal</Text>
+            <View style={styles.card}>
+              <Text style={styles.subSectionTitle}>Registrar Nuevo Empleado</Text>
+              <TextInput style={styles.input} placeholder="Nombre Completo" value={newUserName} onChangeText={setNewUserName} />
+              <TextInput style={styles.input} placeholder="Correo Electrónico" value={newUserEmail} onChangeText={setNewUserEmail} autoCapitalize="none" />
+              <TextInput style={styles.input} placeholder="Contraseña" secureTextEntry value={newUserPass} onChangeText={setNewUserPass} />
+              <TextInput style={styles.input} placeholder="Rol (dueno, encargado, vendedor, cajero, auditor)" value={newUserRole} onChangeText={setNewUserRole} />
+              <TouchableOpacity style={styles.buttonPrimary} onPress={handleCreateUser} disabled={loading}>
+                <Text style={styles.buttonText}>+ Guardar Empleado</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.subSectionTitle}>Personal y Asignación de Caja</Text>
             {usersList.map(u => (
               <View key={u.id} style={styles.productCard}>
-                <Text>{u.name} ({u.role}) - {u.is_cashier_active ? '🟢 CAJERO' : '⚪ Resto'}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontWeight: 'bold' }}>{u.name} ({u.role})</Text>
+                  <Text style={{ color: '#666', fontSize: 12 }}>{u.email}</Text>
+                  <Text style={{ color: u.is_cashier_active ? '#28a745' : '#666', fontWeight: 'bold', marginTop: 4 }}>
+                    {u.is_cashier_active ? '🟢 CAJERO DE TURNO' : '⚪ Fuera de Caja'}
+                  </Text>
+                </View>
+                {!u.is_cashier_active && (
+                  <TouchableOpacity style={styles.buttonSuccess} onPress={() => handleSetCashier(u.id)}>
+                    <Text style={styles.buttonText}>Asignar Caja</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             ))}
           </ScrollView>
         )}
       </View>
 
+      {/* NAVBAR */}
       <View style={styles.navbar}>
         <TouchableOpacity style={[styles.navBtn, currentTab === 'preventa' && styles.navActive]} onPress={() => setCurrentTab('preventa')}><Text style={styles.navText}>🛒 Pre-venta</Text></TouchableOpacity>
         <TouchableOpacity style={[styles.navBtn, currentTab === 'caja' && styles.navActive]} onPress={() => setCurrentTab('caja')}><Text style={styles.navText}>💳 Caja</Text></TouchableOpacity>
@@ -322,9 +474,12 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 10 },
   subSectionTitle: { fontSize: 15, fontWeight: 'bold', marginTop: 15, marginBottom: 8, color: '#444' },
   input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ddd', padding: 12, borderRadius: 8, marginBottom: 10 },
-  buttonPrimary: { backgroundColor: '#007bff', padding: 14, borderRadius: 8, alignItems: 'center', marginTop: 15 },
-  buttonSuccess: { backgroundColor: '#28a745', padding: 14, borderRadius: 8, alignItems: 'center', marginTop: 15 },
+  buttonPrimary: { backgroundColor: '#007bff', padding: 14, borderRadius: 8, alignItems: 'center', marginTop: 10 },
+  buttonCamera: { backgroundColor: '#6f42c1', padding: 12, borderRadius: 8, alignItems: 'center', marginBottom: 10 },
+  buttonSuccess: { backgroundColor: '#28a745', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 10 },
+  buttonDanger: { backgroundColor: '#dc3545', padding: 8, borderRadius: 6 },
   buttonText: { color: '#fff', fontWeight: 'bold' },
+  cameraContainer: { height: 200, borderRadius: 10, overflow: 'hidden', marginBottom: 15 },
   gridContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
   gridCard: { backgroundColor: '#fff', width: '48%', padding: 10, borderRadius: 8, marginBottom: 8, borderWidth: 1, borderColor: '#ddd' },
   gridTitle: { fontWeight: 'bold', fontSize: 13 },
@@ -338,8 +493,8 @@ const styles = StyleSheet.create({
   miniBtn: { backgroundColor: '#e2e8f0', padding: 8, borderRadius: 6, marginRight: 6 },
   payBtn: { flex: 0.31, padding: 10, backgroundColor: '#6c757d', borderRadius: 8, alignItems: 'center' },
   payBtnActive: { backgroundColor: '#007bff' },
-  card: { backgroundColor: '#fff', padding: 12, borderRadius: 8, marginTop: 8 },
-  productCard: { backgroundColor: '#fff', padding: 12, borderRadius: 8, marginBottom: 8 },
+  card: { backgroundColor: '#fff', padding: 12, borderRadius: 8, marginBottom: 15 },
+  productCard: { backgroundColor: '#fff', padding: 12, borderRadius: 8, marginBottom: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   emptyText: { color: '#888', fontStyle: 'italic' },
   loginCard: { backgroundColor: '#fff', margin: 20, padding: 20, borderRadius: 10 },
   appTitle: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 15 },
