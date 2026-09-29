@@ -81,3 +81,13 @@ export const activateCashier = async (userId) => {
   if (!response.ok) throw new Error("Error al asignar caja");
   return await response.json();
 };
+// Registrar Venta
+export const processSale = async (saleData) => {
+  const response = await fetch(`${API_URL}/sales`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(saleData),
+  });
+  if (!response.ok) throw new Error("Error al registrar la venta");
+  return await response.json();
+};
