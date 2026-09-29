@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale } from './api';
+import * as Print from 'expo-print';
+import { shareAsync } from 'expo-sharing';
+import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale } from './api';
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -26,6 +28,10 @@ export default function App() {
   const [searchQueryVendor, setSearchQueryVendor] = useState('');
   const [searchQueryCashier, setSearchQueryCashier] = useState('');
   const [searchQueryStock, setSearchQueryStock] = useState('');
+
+  // Auditoría a Ciegas
+  const [selectedAuditProd, setSelectedAuditProd] = useState(null);
+  const [countedQtyInput, setCountedQtyInput] = useState('');
 
   // Ingreso / Edición de Producto
   const [editingProductId, setEditingProductId] = useState(null);
@@ -160,9 +166,91 @@ export default function App() {
       } else {
         alert(`⚠️ Código EAN ${data} no encontrado.`);
       }
+    } else if (cameraTarget === 'stock') {
+      const found = products.find(p => p.barcode === data);
+      if (found) {
+        setSelectedAuditProd(found);
+        alert(`🎯 Producto seleccionado para conteo: ${found.name}`);
+      } else {
+        alert(`⚠️ Código EAN ${data} no encontrado.`);
+      }
     }
 
     setTimeout(() => setScanned(false), 2000);
+  };
+
+  // Guardar Auditoría a Ciegas
+  const handleSaveAudit = async () => {
+    if (!selectedAuditProd || !countedQtyInput) return alert('Ingresá la cantidad contada');
+    try {
+      setLoading(true);
+      const val = parseFloat(countedQtyInput.replace(',', '.'));
+      await submitStockAudit(selectedAuditProd.id, val, email);
+      alert(`✅ Conteo registrado para ${selectedAuditProd.name}: ${val} ${selectedAuditProd.unit_type}`);
+      setSelectedAuditProd(null);
+      setCountedQtyInput('');
+      setSearchQueryStock('');
+      await loadInitialData();
+    } catch (e) {
+      alert('Error al registrar conteo');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Exportar Listado de Stock Completo a PDF
+  const handleExportPDF = async () => {
+    try {
+      const rows = products.map((p, index) => `
+        <tr style="background-color: ${index % 2 === 0 ? '#ffffff' : '#f9f9f9'};">
+          <td style="padding: 8px; border: 1px solid #ddd;">${p.name}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${p.category || 'Varios'}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">$${p.price_per_unit} / ${p.unit_type}</td>
+          <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold; color: ${p.stock <= 2 ? '#dc3545' : '#000'};">${p.stock} ${p.unit_type}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${p.last_counted_qty !== null && p.last_counted_qty !== undefined ? `${p.last_counted_qty} ${p.unit_type} (${p.last_counted_by || ''})` : 'Sin auditar'}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${p.barcode || '-'}</td>
+        </tr>
+      `).join('');
+
+      const htmlContent = `
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <style>
+              body { font-family: Helvetica, Arial, sans-serif; padding: 20px; }
+              h1 { text-align: center; color: #1a1a1a; margin-bottom: 5px; }
+              p { text-align: center; color: #666; font-size: 12px; margin-bottom: 20px; }
+              table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
+              th { background-color: #007bff; color: white; padding: 10px; border: 1px solid #ddd; text-align: left; }
+            </style>
+          </head>
+          <body>
+            <h1>🍖 Fiambrería POS - Reporte General de Stock</h1>
+            <p>Fecha de emisión: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}</p>
+            <table>
+              <thead>
+                <tr>
+                  <th>Producto</th>
+                  <th>Categoría</th>
+                  <th>Precio</th>
+                  <th>Stock Sistema</th>
+                  <th>Último Conteo Físico</th>
+                  <th>Código EAN</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows}
+              </tbody>
+            </table>
+          </body>
+        </html>
+      `;
+
+      const { uri } = await Print.printToFileAsync({ html: htmlContent });
+      await shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+    } catch (e) {
+      alert('Error generando PDF: ' + e.message);
+    }
   };
 
   // Carrito Vendor
@@ -279,7 +367,7 @@ export default function App() {
         const maxStock = prod ? prod.stock : 999;
 
         if (newQty > maxStock) {
-          alert(`⚠️ No podés superar el stock disponible (${maxStock} ${item.unit_type})`);
+          alert(`⚠️️ No podés superar el stock disponible (${maxStock} ${item.unit_type})`);
           return item;
         }
         return newQty > 0 ? { ...item, qty: newQty } : null;
@@ -480,41 +568,9 @@ export default function App() {
       setLoading(false);
     }
   };
-
-  if (!isLoggedIn) {
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.loginCard}>
-          <Text style={styles.appTitle}>🍖 Fiambrería POS</Text>
-          <TextInput style={styles.input} placeholder="Correo Electrónico" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
-          <TextInput style={styles.input} placeholder="Contraseña" secureTextEntry value={password} onChangeText={setPassword} />
-          <TouchableOpacity style={styles.buttonPrimary} onPress={handleLogin} disabled={loading}>
-            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Ingresar</Text>}
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (!isAccountActive && userRole !== 'superadmin') {
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.loginCard}>
-          <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#dc3545', textAlign: 'center', marginBottom: 10 }}>🔒 Cuenta Inactiva</Text>
-          <Text style={{ textAlign: 'center', color: '#555', marginBottom: 20 }}>
-            Tu usuario aún no ha sido habilitado por el Administrador.
-          </Text>
-          <TouchableOpacity style={styles.buttonDanger} onPress={handleLogout}>
-            <Text style={styles.buttonText}>Cerrar Sesión</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-// Filtros de Búsqueda
   const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.filter(p => p.name.toLowerCase().includes(searchQueryVendor.toLowerCase()));
   const filteredProductsCashier = searchQueryCashier.trim() === '' ? [] : products.filter(p => p.name.toLowerCase().includes(searchQueryCashier.toLowerCase()));
-  const filteredProductsStock = products.filter(p => p.name.toLowerCase().includes(searchQueryStock.toLowerCase()) || (p.barcode && p.barcode.includes(searchQueryStock)));
+  const filteredProductsStock = searchQueryStock.trim() === '' ? [] : products.filter(p => p.name.toLowerCase().includes(searchQueryStock.toLowerCase()) || (p.barcode && p.barcode.includes(searchQueryStock)));
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -527,7 +583,7 @@ export default function App() {
       </View>
 
       <View style={styles.body}>
-        {/* MÓDULO 1: PRE-VENTA */}
+        {/* PRE-VENTA */}
         {currentTab === 'preventa' && (canPreventa || userRole === 'superadmin') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>🛒 Pre-venta (Mostrador)</Text>
@@ -542,7 +598,6 @@ export default function App() {
               </View>
             )}
 
-            {/* BUSCADOR AUTOCOMPLETAR PRE-VENTA */}
             <Text style={styles.subSectionTitle}>🔍 Buscar Producto por Nombre / Código:</Text>
             <TextInput
               style={styles.searchInput}
@@ -602,7 +657,7 @@ export default function App() {
           </ScrollView>
         )}
 
-        {/* MÓDULO 2: CAJA */}
+        {/* CAJA */}
         {currentTab === 'caja' && (canCaja || userRole === 'superadmin') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>💳 Caja y Cobro</Text>
@@ -645,7 +700,6 @@ export default function App() {
               </View>
             )}
 
-            {/* BUSCADOR AUTOCOMPLETAR EN CAJA */}
             <Text style={styles.subSectionTitle}>🔍 Agregar Producto Adicional:</Text>
             <TextInput
               style={styles.searchInput}
@@ -753,43 +807,98 @@ export default function App() {
           </ScrollView>
         )}
 
-        {/* MÓDULO 3: AUDITORÍA DE INVENTARIO Y VERIFICACIÓN DE STOCK */}
+        {/* MÓDULO 3: AUDITORÍA Y CONTROL DE STOCK (A CIEGAS & REPORTES) */}
         {currentTab === 'inventario' && (canStock || userRole === 'superadmin') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>📦 Auditoría y Control de Inventario</Text>
-            <Text style={{ fontSize: 13, color: '#666', marginBottom: 10 }}>
-              Módulo exclusivo para consultar stock existente en tiempo real.
-            </Text>
 
-            <TextInput
-              style={styles.searchInput}
-              placeholder="🔍 Filtrar en stock por nombre o código EAN..."
-              value={searchQueryStock}
-              onChangeText={setSearchQueryStock}
-            />
+            {/* VISTA Y BOTÓN DE IMPRESIÓN EXCLUSIVO SUPERADMIN / DUEÑO */}
+            {(userRole === 'superadmin' || userRole === 'dueno') && (
+              <TouchableOpacity style={[styles.buttonPrimary, { backgroundColor: '#17a2b8', marginBottom: 15 }]} onPress={handleExportPDF}>
+                <Text style={styles.buttonText}>📄 Exportar Reporte de Stock Completo en PDF</Text>
+              </TouchableOpacity>
+            )}
 
-            {filteredProductsStock.length === 0 ? <Text style={styles.emptyText}>No hay productos que coincidan.</Text> : (
-              filteredProductsStock.map(p => (
-                <View key={p.id} style={styles.productCard}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontWeight: 'bold', fontSize: 15 }}>{p.name}</Text>
-                    <Text style={{ color: '#28a745', fontWeight: '600' }}>${p.price_per_unit} / {p.unit_type}</Text>
-                    <Text style={{ color: '#666', fontSize: 12 }}>EAN: {p.barcode || 'Sin EAN'}</Text>
-                  </View>
+            {/* SECCIÓN OPERARIO: CONTEO A CIEGAS */}
+            <View style={styles.card}>
+              <Text style={styles.subSectionTitle}>👁️ Conteo Físico a Ciegas (Operario)</Text>
+              <Text style={{ fontSize: 12, color: '#666', marginBottom: 10 }}>
+                Escanear EAN o buscar el material para ingresar el conteo real contado en la góndola/depósito.
+              </Text>
 
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={{ fontSize: 16, fontWeight: 'bold', color: p.stock <= 2 ? '#dc3545' : '#007bff' }}>
-                      {p.stock} {p.unit_type}
-                    </Text>
-                    {p.stock <= 2 && <Text style={{ color: '#dc3545', fontSize: 10, fontWeight: 'bold' }}>⚠️ Stock Bajo</Text>}
-                  </View>
+              <TouchableOpacity style={styles.buttonCamera} onPress={() => toggleCamera('stock')}>
+                <Text style={styles.buttonText}>{showCamera && cameraTarget === 'stock' ? '📷 Cerrar Escáner' : '📷 Escanear EAN del Producto'}</Text>
+              </TouchableOpacity>
+
+              {showCamera && cameraTarget === 'stock' && permission?.granted && (
+                <View style={styles.cameraContainer}>
+                  <CameraView style={StyleSheet.absoluteFillObject} facing="back" onBarcodeScanned={scanned ? undefined : handleBarcodeScanned} />
                 </View>
-              ))
+              )}
+
+              <TextInput
+                style={styles.searchInput}
+                placeholder="🔍 O escribí el nombre para seleccionar..."
+                value={searchQueryStock}
+                onChangeText={setSearchQueryStock}
+              />
+
+              {searchQueryStock.trim() !== '' && (
+                <View style={styles.dropdownContainer}>
+                  {filteredProductsStock.length === 0 ? (
+                    <Text style={{ padding: 10, color: '#888' }}>No se encontraron coincidencias.</Text>
+                  ) : (
+                    filteredProductsStock.map(p => (
+                      <TouchableOpacity key={p.id} style={styles.dropdownItem} onPress={() => { setSelectedAuditProd(p); setSearchQueryStock(''); }}>
+                        <Text style={{ fontWeight: 'bold' }}>{p.name}</Text>
+                        <Text style={{ color: '#666', fontSize: 11 }}>EAN: {p.barcode || 'Sin EAN'} | Categoría: {p.category}</Text>
+                      </TouchableOpacity>
+                    ))
+                  )}
+                </View>
+              )}
+
+              {selectedAuditProd && (
+                <View style={{ marginTop: 15, backgroundColor: '#e9ecef', padding: 12, borderRadius: 8 }}>
+                  <Text style={{ fontWeight: 'bold', fontSize: 15, color: '#007bff' }}>Producto seleccionado: {selectedAuditProd.name}</Text>
+                  <Text style={{ fontSize: 12, color: '#555', marginBottom: 8 }}>Ingresá la cantidad exacta física hallada:</Text>
+                  
+                  <TextInput
+                    style={styles.inputHighlight}
+                    placeholder={`Cantidad contada (${selectedAuditProd.unit_type})`}
+                    keyboardType="numeric"
+                    value={countedQtyInput}
+                    onChangeText={setCountedQtyInput}
+                  />
+
+                  <TouchableOpacity style={styles.buttonSuccess} onPress={handleSaveAudit} disabled={loading}>
+                    <Text style={styles.buttonText}>💾 Confirmar y Registrar Conteo</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+
+            {/* TABLA COMPARATIVA TEÓRICO VS REAL (SÓLO VISIBLE PARA SUPERADMIN / DUEÑO) */}
+            {(userRole === 'superadmin' || userRole === 'dueno') && (
+              <View style={{ marginTop: 10 }}>
+                <Text style={styles.subSectionTitle}>📊 Resultados de Auditoría (Sistema vs. Conteo Físico)</Text>
+                {products.map(p => (
+                  <View key={p.id} style={styles.productCard}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontWeight: 'bold', fontSize: 14 }}>{p.name}</Text>
+                      <Text style={{ color: '#666', fontSize: 11 }}>Teórico Sistema: <Text style={{ fontWeight: 'bold', color: '#007bff' }}>{p.stock} {p.unit_type}</Text></Text>
+                      <Text style={{ color: '#666', fontSize: 11 }}>
+                        Último Reporte Físico: {p.last_counted_qty !== null && p.last_counted_qty !== undefined ? <Text style={{ fontWeight: 'bold', color: '#28a745' }}>{p.last_counted_qty} {p.unit_type}</Text> : 'Pendiente'}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
             )}
           </ScrollView>
         )}
 
-        {/* MÓDULO 4: INGRESO DE MATERIALES / CATALOGO */}
+        {/* INRESOS */}
         {currentTab === 'ingresos' && (canIngreso || userRole === 'superadmin' || userRole === 'dueno') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>📥 Ingreso de Materiales y Catálogo</Text>
@@ -869,7 +978,7 @@ export default function App() {
           </ScrollView>
         )}
 
-        {/* MÓDULO 5: GESTIÓN DE PERMISOS */}
+        {/* PERMISOS */}
         {currentTab === 'usuarios' && (userRole === 'superadmin' || userRole === 'dueno') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>👥 Personal y Permisos</Text>
