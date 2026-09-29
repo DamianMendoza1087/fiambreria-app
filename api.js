@@ -1,98 +1,94 @@
-let mockProducts = [
-  { id: 1, name: 'Jamón Cocido', category: 'Fiambres', price_per_unit: 8500, unit_type: 'kg', stock: 10.5, barcode: '7791234567890', is_active: true },
-  { id: 2, name: 'Queso Tybo', category: 'Quesos', price_per_unit: 7200, unit_type: 'kg', stock: 15.0, barcode: '7799876543210', is_active: true },
-  { id: 3, name: 'Crema Spa para Piernas', category: 'Cosmética', price_per_unit: 4500, unit_type: 'unid', stock: 12, barcode: '7791112223334', is_active: true }
-];
-
-let mockUsers = [
-  { id: 1, name: 'Admin Principal', email: 'admin@fiambreria.com', role: 'superadmin', is_cashier_active: true }
-];
-
-let mockPreSales = [];
-let nextPreSaleId = 100;
+const API_URL = "https://fiambreria-backend.onrender.com";
 
 export const loginUser = async (email, password) => {
-  const user = mockUsers.find(u => u.email === email) || { id: Date.now(), name: 'Usuario', role: 'cajero', is_cashier_active: true };
-  return { id: user.id, name: user.name, role: user.role, token: 'mock-jwt-token' };
+  const formData = new URLSearchParams();
+  formData.append("username", email);
+  formData.append("password", password);
+  const response = await fetch(`${API_URL}/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: formData.toString(),
+  });
+  if (!response.ok) throw new Error("Credenciales incorrectas");
+  return await response.json();
 };
 
 export const fetchProducts = async () => {
-  return [...mockProducts];
+  const res = await fetch(`${API_URL}/products`);
+  if (!res.ok) throw new Error("Error al obtener productos");
+  return await res.json();
 };
 
 export const createProduct = async (productData) => {
-  const newProduct = {
-    id: Date.now(),
-    name: productData.name,
-    category: productData.category || 'Varios',
-    price_per_unit: parseFloat(productData.price_per_unit),
-    unit_type: productData.unit_type || 'unid',
-    stock: parseFloat(productData.stock),
-    barcode: productData.barcode || null,
-    is_active: true
-  };
-  mockProducts.push(newProduct);
-  return newProduct;
+  const res = await fetch(`${API_URL}/products`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(productData),
+  });
+  if (!res.ok) throw new Error("Error al guardar producto");
+  return await res.json();
+};
+
+export const updateProduct = async (productId, productData) => {
+  const res = await fetch(`${API_URL}/products/${productId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(productData),
+  });
+  if (!res.ok) throw new Error("Error al actualizar producto");
+  return await res.json();
 };
 
 export const deleteProduct = async (id) => {
-  mockProducts = mockProducts.filter(p => p.id !== id);
-  return { success: true };
+  const res = await fetch(`${API_URL}/products/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Error al eliminar producto");
+  return await res.json();
 };
 
 export const fetchUsers = async () => {
-  return [...mockUsers];
+  const res = await fetch(`${API_URL}/users`);
+  if (!res.ok) throw new Error("Error al obtener usuarios");
+  return await res.json();
 };
 
 export const createUser = async (userData) => {
-  const newUser = { id: Date.now(), ...userData, is_cashier_active: false };
-  mockUsers.push(newUser);
-  return newUser;
+  const res = await fetch(`${API_URL}/users`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(userData),
+  });
+  if (!res.ok) throw new Error("Error al crear usuario");
+  return await res.json();
 };
 
 export const activateCashier = async (userId) => {
-  mockUsers = mockUsers.map(u => ({ ...u, is_cashier_active: u.id === userId }));
-  return { success: true };
+  const res = await fetch(`${API_URL}/users/${userId}/activate-cashier`, { method: "PATCH" });
+  if (!res.ok) throw new Error("Error al asignar caja");
+  return await res.json();
 };
 
 export const createPreSale = async (items) => {
-  const preSale = {
-    id: nextPreSaleId++,
-    created_at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    items: items.map(item => {
-      const prod = mockProducts.find(p => p.id === item.product_id);
-      return {
-        product_id: item.product_id,
-        name: prod ? prod.name : 'Producto',
-        price_per_unit: prod ? prod.price_per_unit : 0,
-        unit_type: prod ? prod.unit_type : 'unid',
-        qty: item.quantity
-      };
-    }),
-    total: items.reduce((acc, item) => {
-      const prod = mockProducts.find(p => p.id === item.product_id);
-      return acc + ((prod ? prod.price_per_unit : 0) * item.quantity);
-    }, 0)
-  };
-  mockPreSales.push(preSale);
-  return { presale_id: preSale.id };
+  const res = await fetch(`${API_URL}/presales`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items }),
+  });
+  if (!res.ok) throw new Error("Error al generar pre-venta");
+  return await res.json();
 };
 
 export const fetchPendingPreSales = async () => {
-  return [...mockPreSales];
+  const res = await fetch(`${API_URL}/presales/pending`);
+  if (!res.ok) throw new Error("Error al obtener pre-ventas pendientes");
+  return await res.json();
 };
 
 export const finalizeSale = async (saleData) => {
-  saleData.items.forEach(item => {
-    const prodIndex = mockProducts.findIndex(p => p.id === item.product_id);
-    if (prodIndex !== -1) {
-      mockProducts[prodIndex].stock = Math.max(0, mockProducts[prodIndex].stock - item.quantity);
-    }
+  const res = await fetch(`${API_URL}/sales/finalize`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(saleData),
   });
-
-  if (saleData.presale_id) {
-    mockPreSales = mockPreSales.filter(ps => ps.id !== saleData.presale_id);
-  }
-
-  return { success: true };
+  if (!res.ok) throw new Error("Error al procesar cobro");
+  return await res.json();
 };
