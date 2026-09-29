@@ -33,9 +33,10 @@ export default function App() {
   const [selectedPreSaleId, setSelectedPreSaleId] = useState(null);
   const [cashierCart, setCashierCart] = useState([]);
   const [paymentMethod, setPaymentMethod] = useState('Efectivo');
-  const [amountCash, setAmountCash] = useState('');
-  const [amountMP, setAmountMP] = useState('');
-  const [cashTendered, setCashTendered] = useState(''); // Dinero entregado por el cliente
+  
+  // Pago Mixto y Vuelto
+  const [amountMP, setAmountMP] = useState(''); // Único monto para Mercado Pago en pago mixto
+  const [cashTendered, setCashTendered] = useState(''); // Billete/Efectivo que entrega el cliente
 
   // Usuarios
   const [usersList, setUsersList] = useState([]);
@@ -163,7 +164,8 @@ export default function App() {
   };
 
   const updateVendorCartDirectQty = (id, valString) => {
-    const val = parseFloat(valString) || 0;
+    const cleanVal = valString.replace(',', '.');
+    const val = parseFloat(cleanVal) || 0;
     const prod = products.find(p => p.id === id);
     const maxStock = prod ? prod.stock : 999;
 
@@ -172,7 +174,7 @@ export default function App() {
         if (val > maxStock) {
           alert(`⚠️ Supera el stock disponible (${maxStock} ${item.unit_type}).`);
         }
-        return { ...item, qty: Math.min(val, maxStock) };
+        return { ...item, qty: cleanVal };
       }
       return item;
     }));
@@ -182,7 +184,7 @@ export default function App() {
     if (vendorCart.length === 0) return alert('El carrito de pre-venta está vacío');
     try {
       setLoading(true);
-      const items = vendorCart.map(i => ({ product_id: i.id, quantity: i.qty }));
+      const items = vendorCart.map(i => ({ product_id: i.id, quantity: parseFloat(i.qty) || 0 }));
       const res = await createPreSale(items);
       alert(`✅ Pre-venta #${res.presale_id} generada correctamente`);
       setVendorCart([]);
@@ -208,6 +210,7 @@ export default function App() {
       };
     }));
     setCashTendered('');
+    setAmountMP('');
   };
 
   const updateCashierCartQty = (id, delta) => {
@@ -215,7 +218,8 @@ export default function App() {
       if (item.id === id) {
         const prod = products.find(p => p.id === id);
         const step = item.unit_type === 'kg' ? 0.25 : 1;
-        const newQty = item.qty + (delta * step);
+        const currentNum = parseFloat(item.qty) || 0;
+        const newQty = currentNum + (delta * step);
         const maxStock = prod ? prod.stock : 999;
 
         if (newQty > maxStock) {
@@ -229,7 +233,8 @@ export default function App() {
   };
 
   const updateCashierCartDirectQty = (id, valString) => {
-    const val = parseFloat(valString) || 0;
+    const cleanVal = valString.replace(',', '.');
+    const val = parseFloat(cleanVal) || 0;
     const prod = products.find(p => p.id === id);
     const maxStock = prod ? prod.stock : 999;
 
@@ -238,7 +243,7 @@ export default function App() {
         if (val > maxStock) {
           alert(`⚠️ Supera el stock disponible (${maxStock} ${item.unit_type}).`);
         }
-        return { ...item, qty: Math.min(val, maxStock) };
+        return { ...item, qty: cleanVal };
       }
       return item;
     }));
@@ -247,7 +252,7 @@ export default function App() {
   const addToCashierCart = (prod) => {
     const existing = cashierCart.find(i => i.id === prod.id);
     const step = prod.unit_type === 'kg' ? 0.25 : 1;
-    const currentQty = existing ? existing.qty : 0;
+    const currentQty = existing ? (parseFloat(existing.qty) || 0) : 0;
     const newQty = currentQty + step;
 
     if (newQty > prod.stock) {
@@ -261,18 +266,21 @@ export default function App() {
     }
   };
 
-  const getCashierTotal = () => cashierCart.reduce((acc, i) => acc + (i.price_per_unit * i.qty), 0).toFixed(2);
+  const getCashierTotal = () => cashierCart.reduce((acc, i) => acc + (i.price_per_unit * (parseFloat(i.qty) || 0)), 0).toFixed(2);
 
-  // Cálculo automático del vuelto en Efectivo o Pago Mixto
-  const getExpectedCashAmount = () => {
+  // Lógica de Pagos y Vuelto
+  const getRequiredCash = () => {
     const total = parseFloat(getCashierTotal()) || 0;
     if (paymentMethod === 'Efectivo') return total;
-    if (paymentMethod === 'Mixto') return parseFloat(amountCash) || 0;
+    if (paymentMethod === 'Mixto') {
+      const mpVal = parseFloat(amountMP) || 0;
+      return Math.max(0, total - mpVal);
+    }
     return 0;
   };
 
   const getChangeDue = () => {
-    const cashRequired = getExpectedCashAmount();
+    const cashRequired = getRequiredCash();
     const tendered = parseFloat(cashTendered) || 0;
     const change = tendered - cashRequired;
     return change > 0 ? change.toFixed(2) : '0.00';
@@ -287,19 +295,19 @@ export default function App() {
       cash = total;
       const tendered = parseFloat(cashTendered) || 0;
       if (tendered < total) {
-        return alert(`⚠️ El dinero ingresado ($${tendered}) es menor que el total a pagar en efectivo ($${total})`);
+        return alert(`⚠️ El dinero en efectivo ingresado ($${tendered}) es menor que el total ($${total})`);
       }
     } else if (paymentMethod === 'Mercado Pago') {
       mp = total;
     } else {
-      cash = parseFloat(amountCash) || 0;
       mp = parseFloat(amountMP) || 0;
-      if ((cash + mp).toFixed(2) !== total.toFixed(2)) {
-        return alert(`La suma de Efectivo ($${cash}) y MP ($${mp}) debe ser igual al Total ($${total})`);
+      if (mp > total) {
+        return alert(`⚠️ El monto de Mercado Pago ($${mp}) no puede superar el total ($${total})`);
       }
+      cash = total - mp;
       const tendered = parseFloat(cashTendered) || 0;
       if (cash > 0 && tendered < cash) {
-        return alert(`⚠️️ El dinero ingresado ($${tendered}) es menor que la parte a cobrar en efectivo ($${cash})`);
+        return alert(`⚠️ El dinero ingresado ($${tendered}) es menor que el saldo a cobrar en efectivo ($${cash.toFixed(2)})`);
       }
     }
 
@@ -307,16 +315,16 @@ export default function App() {
       setLoading(true);
       await finalizeSale({
         presale_id: selectedPreSaleId,
-        items: cashierCart.map(i => ({ product_id: i.id, quantity: i.qty })),
+        items: cashierCart.map(i => ({ product_id: i.id, quantity: parseFloat(i.qty) || 0 })),
         total_amount: total,
         amount_cash: cash,
         amount_mp: mp,
         payment_method: paymentMethod
       });
-      alert(`💳 Venta cobrada con éxito!\nVuelto a entregar: $${getChangeDue()}`);
+      alert(`💳 Venta cobrada con éxito!\nVuelto a entregar en efectivo: $${getChangeDue()}`);
       setSelectedPreSaleId(null);
       setCashierCart([]);
-      setAmountCash(''); setAmountMP(''); setCashTendered('');
+      setAmountMP(''); setCashTendered('');
       await loadInitialData();
     } catch (e) {
       alert('Error procesando cobro');
@@ -347,9 +355,9 @@ export default function App() {
       const payload = {
         name: prodName,
         category: prodCategory,
-        price_per_unit: parseFloat(prodPrice),
+        price_per_unit: parseFloat(prodPrice.replace(',', '.')),
         unit_type: prodUnitType,
-        stock: parseFloat(prodStock),
+        stock: parseFloat(prodStock.replace(',', '.')),
         barcode: prodBarcode || null,
         is_active: true
       };
@@ -485,7 +493,7 @@ return (
                     <Text style={{ fontSize: 11, marginLeft: 4, marginRight: 8, color: '#444' }}>{i.unit_type}</Text>
                   </View>
 
-                  <Text style={{ fontWeight: 'bold' }}>${(i.price_per_unit * i.qty).toFixed(2)}</Text>
+                  <Text style={{ fontWeight: 'bold' }}>${((i.price_per_unit) * (parseFloat(i.qty) || 0)).toFixed(2)}</Text>
                 </View>
               ))
             )}
@@ -496,7 +504,7 @@ return (
           </ScrollView>
         )}
 
-        {/* CAJA Y COBRO CON CÁLCULO DE VUELTO */}
+        {/* CAJA Y COBRO CON PAGO MIXTO Y VUELTO CORREGIDO */}
         {currentTab === 'caja' && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>💳 Caja y Cobro</Text>
@@ -554,7 +562,7 @@ return (
                     <Text style={{ fontSize: 11, marginLeft: 4, marginRight: 8, color: '#444' }}>{i.unit_type}</Text>
                   </View>
 
-                  <Text style={{ fontWeight: 'bold' }}>${(i.price_per_unit * i.qty).toFixed(2)}</Text>
+                  <Text style={{ fontWeight: 'bold' }}>${((i.price_per_unit) * (parseFloat(i.qty) || 0)).toFixed(2)}</Text>
                 </View>
               ))
             )}
@@ -566,30 +574,39 @@ return (
               <TouchableOpacity style={[styles.payBtn, paymentMethod === 'Mixto' && styles.payBtnActive]} onPress={() => setPaymentMethod('Mixto')}><Text style={styles.buttonText}>Mixto</Text></TouchableOpacity>
             </View>
 
-            {/* SECCIÓN PAGO MIXTO */}
+            {/* SECCIÓN PAGO MIXTO CORREGIDO */}
             {paymentMethod === 'Mixto' && (
               <View style={styles.card}>
-                <TextInput style={styles.input} placeholder="Monto en Efectivo a Cobrar ($)" keyboardType="numeric" value={amountCash} onChangeText={setAmountCash} />
-                <TextInput style={styles.input} placeholder="Monto en Mercado Pago ($)" keyboardType="numeric" value={amountMP} onChangeText={setAmountMP} />
+                <Text style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 5 }}>📱 Cobro con Mercado Pago:</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Monto a cobrar por MP ($)"
+                  keyboardType="numeric"
+                  value={amountMP}
+                  onChangeText={setAmountMP}
+                />
+                <Text style={{ fontSize: 13, color: '#007bff', fontWeight: 'bold', marginTop: 4 }}>
+                  💵 Restante a cobrar en Efectivo: ${getRequiredCash().toFixed(2)}
+                </Text>
               </View>
             )}
 
-            {/* SECCIÓN CÁLCULO DE VUELTO (EFECTIVO O MIXTO) */}
-            {(paymentMethod === 'Efectivo' || (paymentMethod === 'Mixto' && (parseFloat(amountCash) > 0))) && (
+            {/* SECCIÓN VUELTO EN EFECTIVO */}
+            {(paymentMethod === 'Efectivo' || paymentMethod === 'Mixto') && (
               <View style={styles.changeCard}>
                 <Text style={{ fontWeight: 'bold', fontSize: 13, color: '#333', marginBottom: 6 }}>
-                  💵 Paga con Billete/Efectivo:
+                  💵 Paga con Billete/Efectivo: (Requerido: ${getRequiredCash().toFixed(2)})
                 </Text>
                 <TextInput
                   style={styles.inputHighlight}
-                  placeholder={`Ej: ${paymentMethod === 'Efectivo' ? getCashierTotal() : (amountCash || '0')}`}
+                  placeholder={`Ej: ${getRequiredCash().toFixed(2)}`}
                   keyboardType="numeric"
                   value={cashTendered}
                   onChangeText={setCashTendered}
                 />
                 
                 <View style={styles.changeRow}>
-                  <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#155724' }}>💰 Vuelto a Entregar:</Text>
+                  <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#155724' }}>💰 Vuelto en Efectivo:</Text>
                   <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#28a745' }}>${getChangeDue()}</Text>
                 </View>
               </View>
@@ -746,7 +763,7 @@ const styles = StyleSheet.create({
   subSectionTitle: { fontSize: 15, fontWeight: 'bold', marginTop: 15, marginBottom: 8, color: '#444' },
   input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ddd', padding: 12, borderRadius: 8, marginBottom: 10 },
   inputHighlight: { backgroundColor: '#fff', borderWidth: 2, borderColor: '#007bff', padding: 12, borderRadius: 8, fontSize: 16, fontWeight: 'bold', color: '#007bff' },
-  inputSmall: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ccc', padding: 6, borderRadius: 6, width: 50, textAlign: 'center', fontWeight: 'bold' },
+  inputSmall: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ccc', padding: 6, borderRadius: 6, width: 65, textAlign: 'center', fontWeight: 'bold' },
   typeBtn: { flex: 1, padding: 10, borderWidth: 1, borderColor: '#ccc', borderRadius: 8, alignItems: 'center', backgroundColor: '#e9ecef' },
   typeBtnActive: { backgroundColor: '#007bff', borderColor: '#0056b3' },
   buttonPrimary: { backgroundColor: '#007bff', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 10 },
