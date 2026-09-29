@@ -19,11 +19,14 @@ export default function App() {
   const [prodStock, setProdStock] = useState('');
   const [prodBarcode, setProdBarcode] = useState('');
 
-  // Pre-venta
-  const [vendorCart, setVendorCart] = useState([]);
+  // Cámara / Escáner
   const [permission, requestPermission] = useCameraPermissions();
   const [showCamera, setShowCamera] = useState(false);
+  const [cameraTarget, setCameraTarget] = useState(null); // 'preventa', 'caja', 'inventario'
   const [scanned, setScanned] = useState(false);
+
+  // Pre-venta
+  const [vendorCart, setVendorCart] = useState([]);
 
   // Caja
   const [pendingPreSales, setPendingPreSales] = useState([]);
@@ -67,7 +70,7 @@ export default function App() {
     }
   };
 
-  const toggleCamera = async () => {
+  const toggleCamera = async (targetModule) => {
     if (!permission?.granted) {
       const res = await requestPermission();
       if (!res.granted) {
@@ -75,20 +78,40 @@ export default function App() {
         return;
       }
     }
-    setShowCamera(!showCamera);
+    if (showCamera && cameraTarget === targetModule) {
+      setShowCamera(false);
+      setCameraTarget(null);
+    } else {
+      setCameraTarget(targetModule);
+      setShowCamera(true);
+    }
   };
 
   const handleBarcodeScanned = ({ data }) => {
     setScanned(true);
     setShowCamera(false);
-    const foundProduct = products.find(p => p.barcode === data);
-    
-    if (foundProduct) {
-      addToVendorCart(foundProduct);
-      alert(`Producto agregado: ${foundProduct.name}`);
-    } else {
-      alert(`Código ${data} no encontrado en el catálogo.`);
+
+    if (cameraTarget === 'inventario') {
+      setProdBarcode(data);
+      alert(`✅ Código EAN capturado: ${data}`);
+    } else if (cameraTarget === 'preventa') {
+      const found = products.find(p => p.barcode === data);
+      if (found) {
+        addToVendorCart(found);
+        alert(`✅ Agregado a Pre-venta: ${found.name}`);
+      } else {
+        alert(`⚠️ Código EAN ${data} no encontrado en el catálogo.`);
+      }
+    } else if (cameraTarget === 'caja') {
+      const found = products.find(p => p.barcode === data);
+      if (found) {
+        addToCashierCart(found);
+        alert(`✅ Agregado a Caja: ${found.name}`);
+      } else {
+        alert(`⚠️ Código EAN ${data} no encontrado en el catálogo.`);
+      }
     }
+
     setTimeout(() => setScanned(false), 2000);
   };
 
@@ -270,17 +293,13 @@ return (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>🛒 Armar Pre-venta (Mostrador)</Text>
             
-            <TouchableOpacity style={styles.buttonCamera} onPress={toggleCamera}>
-              <Text style={styles.buttonText}>{showCamera ? '📷 Cerrar Cámara' : '📷 Escanear con Cámara'}</Text>
+            <TouchableOpacity style={styles.buttonCamera} onPress={() => toggleCamera('preventa')}>
+              <Text style={styles.buttonText}>{showCamera && cameraTarget === 'preventa' ? '📷 Cerrar Escáner EAN' : '📷 Escanear EAN / Código de Barras'}</Text>
             </TouchableOpacity>
 
-            {showCamera && permission?.granted && (
+            {showCamera && cameraTarget === 'preventa' && permission?.granted && (
               <View style={styles.cameraContainer}>
-                <CameraView
-                  style={StyleSheet.absoluteFillObject}
-                  facing="back"
-                  onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
-                />
+                <CameraView style={StyleSheet.absoluteFillObject} facing="back" onBarcodeScanned={scanned ? undefined : handleBarcodeScanned} />
               </View>
             )}
 
@@ -332,6 +351,16 @@ return (
               ))}
             </ScrollView>
 
+            <TouchableOpacity style={styles.buttonCamera} onPress={() => toggleCamera('caja')}>
+              <Text style={styles.buttonText}>{showCamera && cameraTarget === 'caja' ? '📷 Cerrar Escáner EAN' : '📷 Agregar Producto con Escáner EAN'}</Text>
+            </TouchableOpacity>
+
+            {showCamera && cameraTarget === 'caja' && permission?.granted && (
+              <View style={styles.cameraContainer}>
+                <CameraView style={StyleSheet.absoluteFillObject} facing="back" onBarcodeScanned={scanned ? undefined : handleBarcodeScanned} />
+              </View>
+            )}
+
             <Text style={styles.subSectionTitle}>Edición de Ticket en Caja:</Text>
             {cashierCart.length === 0 ? <Text style={styles.emptyText}>Seleccioná una pre-venta o agregá productos.</Text> : (
               cashierCart.map(i => (
@@ -346,15 +375,6 @@ return (
                 </View>
               ))
             )}
-
-            <Text style={styles.subSectionTitle}>Agregar Producto Extra a la Caja:</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
-              {products.map(p => (
-                <TouchableOpacity key={p.id} style={styles.miniBtn} onPress={() => addToCashierCart(p)}>
-                  <Text style={{ fontSize: 12 }}>+ {p.name}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
 
             <Text style={styles.subSectionTitle}>Método de Pago:</Text>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -391,8 +411,21 @@ return (
               <TextInput style={styles.input} placeholder="Categoría (ej: Fiambres, Quesos)" value={prodCategory} onChangeText={setProdCategory} />
               <TextInput style={styles.input} placeholder="Precio x kg / Unidad ($)" keyboardType="numeric" value={prodPrice} onChangeText={setProdPrice} />
               <TextInput style={styles.input} placeholder="Stock Inicial" keyboardType="numeric" value={prodStock} onChangeText={setProdStock} />
-              <TextInput style={styles.input} placeholder="Código de Barras EAN (opcional)" value={prodBarcode} onChangeText={setProdBarcode} />
-              <TouchableOpacity style={styles.buttonPrimary} onPress={handleCreateProduct} disabled={loading}>
+              
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="Código de Barras / EAN" value={prodBarcode} onChangeText={setProdBarcode} />
+                <TouchableOpacity style={[styles.buttonCamera, { marginLeft: 8, marginBottom: 0, padding: 12 }]} onPress={() => toggleCamera('inventario')}>
+                  <Text style={styles.buttonText}>📷 Capturar</Text>
+                </TouchableOpacity>
+              </View>
+
+              {showCamera && cameraTarget === 'inventario' && permission?.granted && (
+                <View style={[styles.cameraContainer, { marginTop: 10 }]}>
+                  <CameraView style={StyleSheet.absoluteFillObject} facing="back" onBarcodeScanned={scanned ? undefined : handleBarcodeScanned} />
+                </View>
+              )}
+
+              <TouchableOpacity style={[styles.buttonPrimary, { marginTop: 15 }]} onPress={handleCreateProduct} disabled={loading}>
                 <Text style={styles.buttonText}>+ Guardar Producto</Text>
               </TouchableOpacity>
             </View>
@@ -490,7 +523,6 @@ const styles = StyleSheet.create({
   preSaleBadge: { backgroundColor: '#e9ecef', padding: 12, borderRadius: 8, marginRight: 8, borderWidth: 1, borderColor: '#ccc' },
   preSaleBadgeActive: { backgroundColor: '#007bff', borderColor: '#0056b3' },
   qtyBtn: { backgroundColor: '#007bff', width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  miniBtn: { backgroundColor: '#e2e8f0', padding: 8, borderRadius: 6, marginRight: 6 },
   payBtn: { flex: 0.31, padding: 10, backgroundColor: '#6c757d', borderRadius: 8, alignItems: 'center' },
   payBtnActive: { backgroundColor: '#007bff' },
   card: { backgroundColor: '#fff', padding: 12, borderRadius: 8, marginBottom: 15 },
