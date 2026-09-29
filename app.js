@@ -35,6 +35,7 @@ export default function App() {
   const [paymentMethod, setPaymentMethod] = useState('Efectivo');
   const [amountCash, setAmountCash] = useState('');
   const [amountMP, setAmountMP] = useState('');
+  const [cashTendered, setCashTendered] = useState(''); // Dinero entregado por el cliente
 
   // Usuarios
   const [usersList, setUsersList] = useState([]);
@@ -53,7 +54,6 @@ export default function App() {
     }
   };
 
-  // Sincronización automática periódica (Sondeo en tiempo real cada 5 seg)
   useEffect(() => {
     if (!isLoggedIn) return;
     loadInitialData();
@@ -207,6 +207,7 @@ export default function App() {
         maxStock: prod ? prod.stock : 999
       };
     }));
+    setCashTendered('');
   };
 
   const updateCashierCartQty = (id, delta) => {
@@ -262,18 +263,43 @@ export default function App() {
 
   const getCashierTotal = () => cashierCart.reduce((acc, i) => acc + (i.price_per_unit * i.qty), 0).toFixed(2);
 
+  // Cálculo automático del vuelto en Efectivo o Pago Mixto
+  const getExpectedCashAmount = () => {
+    const total = parseFloat(getCashierTotal()) || 0;
+    if (paymentMethod === 'Efectivo') return total;
+    if (paymentMethod === 'Mixto') return parseFloat(amountCash) || 0;
+    return 0;
+  };
+
+  const getChangeDue = () => {
+    const cashRequired = getExpectedCashAmount();
+    const tendered = parseFloat(cashTendered) || 0;
+    const change = tendered - cashRequired;
+    return change > 0 ? change.toFixed(2) : '0.00';
+  };
+
   const handleFinalizeSale = async () => {
     if (cashierCart.length === 0) return alert('No hay productos en el ticket de caja');
     const total = parseFloat(getCashierTotal());
     let cash = 0, mp = 0;
 
-    if (paymentMethod === 'Efectivo') cash = total;
-    else if (paymentMethod === 'Mercado Pago') mp = total;
-    else {
+    if (paymentMethod === 'Efectivo') {
+      cash = total;
+      const tendered = parseFloat(cashTendered) || 0;
+      if (tendered < total) {
+        return alert(`⚠️ El dinero ingresado ($${tendered}) es menor que el total a pagar en efectivo ($${total})`);
+      }
+    } else if (paymentMethod === 'Mercado Pago') {
+      mp = total;
+    } else {
       cash = parseFloat(amountCash) || 0;
       mp = parseFloat(amountMP) || 0;
       if ((cash + mp).toFixed(2) !== total.toFixed(2)) {
         return alert(`La suma de Efectivo ($${cash}) y MP ($${mp}) debe ser igual al Total ($${total})`);
+      }
+      const tendered = parseFloat(cashTendered) || 0;
+      if (cash > 0 && tendered < cash) {
+        return alert(`⚠️️ El dinero ingresado ($${tendered}) es menor que la parte a cobrar en efectivo ($${cash})`);
       }
     }
 
@@ -287,10 +313,10 @@ export default function App() {
         amount_mp: mp,
         payment_method: paymentMethod
       });
-      alert('💳 Venta cobrada con éxito');
+      alert(`💳 Venta cobrada con éxito!\nVuelto a entregar: $${getChangeDue()}`);
       setSelectedPreSaleId(null);
       setCashierCart([]);
-      setAmountCash(''); setAmountMP('');
+      setAmountCash(''); setAmountMP(''); setCashTendered('');
       await loadInitialData();
     } catch (e) {
       alert('Error procesando cobro');
@@ -299,7 +325,6 @@ export default function App() {
     }
   };
 
-  // --- LÓGICA DE ALTA Y EDICIÓN DE PRODUCTOS ---
   const handleStartEditProduct = (prod) => {
     setEditingProductId(prod.id);
     setProdName(prod.name);
@@ -471,7 +496,7 @@ return (
           </ScrollView>
         )}
 
-        {/* CAJA */}
+        {/* CAJA Y COBRO CON CÁLCULO DE VUELTO */}
         {currentTab === 'caja' && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>💳 Caja y Cobro</Text>
@@ -541,15 +566,37 @@ return (
               <TouchableOpacity style={[styles.payBtn, paymentMethod === 'Mixto' && styles.payBtnActive]} onPress={() => setPaymentMethod('Mixto')}><Text style={styles.buttonText}>Mixto</Text></TouchableOpacity>
             </View>
 
+            {/* SECCIÓN PAGO MIXTO */}
             {paymentMethod === 'Mixto' && (
               <View style={styles.card}>
-                <TextInput style={styles.input} placeholder="Monto en Efectivo ($)" keyboardType="numeric" value={amountCash} onChangeText={setAmountCash} />
+                <TextInput style={styles.input} placeholder="Monto en Efectivo a Cobrar ($)" keyboardType="numeric" value={amountCash} onChangeText={setAmountCash} />
                 <TextInput style={styles.input} placeholder="Monto en Mercado Pago ($)" keyboardType="numeric" value={amountMP} onChangeText={setAmountMP} />
               </View>
             )}
 
+            {/* SECCIÓN CÁLCULO DE VUELTO (EFECTIVO O MIXTO) */}
+            {(paymentMethod === 'Efectivo' || (paymentMethod === 'Mixto' && (parseFloat(amountCash) > 0))) && (
+              <View style={styles.changeCard}>
+                <Text style={{ fontWeight: 'bold', fontSize: 13, color: '#333', marginBottom: 6 }}>
+                  💵 Paga con Billete/Efectivo:
+                </Text>
+                <TextInput
+                  style={styles.inputHighlight}
+                  placeholder={`Ej: ${paymentMethod === 'Efectivo' ? getCashierTotal() : (amountCash || '0')}`}
+                  keyboardType="numeric"
+                  value={cashTendered}
+                  onChangeText={setCashTendered}
+                />
+                
+                <View style={styles.changeRow}>
+                  <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#155724' }}>💰 Vuelto a Entregar:</Text>
+                  <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#28a745' }}>${getChangeDue()}</Text>
+                </View>
+              </View>
+            )}
+
             <View style={styles.totalBox}>
-              <Text style={{ fontSize: 18, fontWeight: 'bold' }}>TOTAL:</Text>
+              <Text style={{ fontSize: 18, fontWeight: 'bold' }}>TOTAL TICKET:</Text>
               <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#28a745' }}>${getCashierTotal()}</Text>
             </View>
 
@@ -559,7 +606,7 @@ return (
           </ScrollView>
         )}
 
-        {/* INVENTARIO COMPLETO (CON EDITAR PRODUCTO) */}
+        {/* INVENTARIO */}
         {currentTab === 'inventario' && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>📦 Control de Inventario</Text>
@@ -639,7 +686,7 @@ return (
           </ScrollView>
         )}
 
-        {/* USUARIOS COMPLETO */}
+        {/* USUARIOS */}
         {currentTab === 'usuarios' && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>👥 Gestión de Personal</Text>
@@ -698,6 +745,7 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 10 },
   subSectionTitle: { fontSize: 15, fontWeight: 'bold', marginTop: 15, marginBottom: 8, color: '#444' },
   input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ddd', padding: 12, borderRadius: 8, marginBottom: 10 },
+  inputHighlight: { backgroundColor: '#fff', borderWidth: 2, borderColor: '#007bff', padding: 12, borderRadius: 8, fontSize: 16, fontWeight: 'bold', color: '#007bff' },
   inputSmall: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ccc', padding: 6, borderRadius: 6, width: 50, textAlign: 'center', fontWeight: 'bold' },
   typeBtn: { flex: 1, padding: 10, borderWidth: 1, borderColor: '#ccc', borderRadius: 8, alignItems: 'center', backgroundColor: '#e9ecef' },
   typeBtnActive: { backgroundColor: '#007bff', borderColor: '#0056b3' },
@@ -720,6 +768,8 @@ const styles = StyleSheet.create({
   payBtn: { flex: 0.31, padding: 10, backgroundColor: '#6c757d', borderRadius: 8, alignItems: 'center' },
   payBtnActive: { backgroundColor: '#007bff' },
   card: { backgroundColor: '#fff', padding: 12, borderRadius: 8, marginBottom: 15 },
+  changeCard: { backgroundColor: '#e8f4f8', padding: 15, borderRadius: 10, marginBottom: 10, borderWidth: 1, borderColor: '#b8daff' },
+  changeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#bee5eb' },
   productCard: { backgroundColor: '#fff', padding: 12, borderRadius: 8, marginBottom: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   emptyText: { color: '#888', fontStyle: 'italic' },
   loginCard: { backgroundColor: '#fff', margin: 20, padding: 20, borderRadius: 10 },
