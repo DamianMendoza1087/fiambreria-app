@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator } from 'react-native';
+import React, { useState } from 'react';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { loginUser, fetchProducts, createProduct, deleteProduct, fetchUsers, createUser, activateCashier, processSale } from './api';
 
@@ -16,7 +16,7 @@ export default function App() {
   const [cart, setCart] = useState([]);
   const [paymentMethod, setPaymentMethod] = useState('Efectivo');
   
-  // Estados de Cámara
+  // Estados de Cámara Permisos Android / Web
   const [permission, requestPermission] = useCameraPermissions();
   const [showCamera, setShowCamera] = useState(false);
   const [scanned, setScanned] = useState(false);
@@ -63,7 +63,18 @@ export default function App() {
     }
   };
 
-  // Escáner de Código de Barras
+  // Manejo Seguro de Permisos de Cámara en Android
+  const toggleCamera = async () => {
+    if (!permission?.granted) {
+      const res = await requestPermission();
+      if (!res.granted) {
+        alert('Se requieren permisos de cámara para escanear.');
+        return;
+      }
+    }
+    setShowCamera(!showCamera);
+  };
+
   const handleBarcodeScanned = ({ data }) => {
     setScanned(true);
     setShowCamera(false);
@@ -73,7 +84,7 @@ export default function App() {
       addToCart(foundProduct);
       alert(`Producto agregado: ${foundProduct.name}`);
     } else {
-      alert(`Código ${data} no encontrado en el catálogo.`);
+      alert(`Código ${data} no encontrado.`);
     }
     setTimeout(() => setScanned(false), 2000);
   };
@@ -203,18 +214,15 @@ export default function App() {
 
       <View style={styles.body}>
         {currentTab === 'caja' && (
-          <ScrollView contentContainerStyle={styles.scrollPadding}>
+          <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>🛒 Punto de Venta (Caja)</Text>
 
-            {/* Lector de Cámara */}
-            <TouchableOpacity style={styles.buttonCamera} onPress={() => {
-              if (!permission?.granted) requestPermission();
-              setShowCamera(!showCamera);
-            }}>
-              <Text style={styles.buttonText}>{showCamera ? '📷 Cerrar Cámara' : '📷 Abrir Escáner Cámara'}</Text>
+            {/* Botón Lector de Cámara */}
+            <TouchableOpacity style={styles.buttonCamera} onPress={toggleCamera}>
+              <Text style={styles.buttonText}>{showCamera ? '📷 Cerrar Cámara' : '📷 Escanear con Cámara'}</Text>
             </TouchableOpacity>
 
-            {showCamera && (
+            {showCamera && permission?.granted && (
               <View style={styles.cameraContainer}>
                 <CameraView
                   style={StyleSheet.absoluteFillObject}
@@ -224,7 +232,7 @@ export default function App() {
               </View>
             )}
 
-            <Text style={styles.subSectionTitle}>Botones Rápidos / Productos:</Text>
+            <Text style={styles.subSectionTitle}>Productos Disponibles:</Text>
             <View style={styles.gridContainer}>
               {products.map(item => (
                 <TouchableOpacity key={item.id} style={styles.gridCard} onPress={() => addToCart(item)}>
@@ -235,7 +243,7 @@ export default function App() {
               ))}
             </View>
 
-            <Text style={styles.subSectionTitle}>Ticket de Venta Actual:</Text>
+            <Text style={styles.subSectionTitle}>Ticket Actual:</Text>
             {cart.length === 0 ? (
               <Text style={styles.emptyText}>Carrito vacío.</Text>
             ) : (
@@ -253,7 +261,6 @@ export default function App() {
               ))
             )}
 
-            {/* Forma de Pago */}
             <Text style={styles.subSectionTitle}>Método de Pago:</Text>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
               <TouchableOpacity style={[styles.payMethodBtn, paymentMethod === 'Efectivo' && styles.payMethodActive]} onPress={() => setPaymentMethod('Efectivo')}>
@@ -275,7 +282,7 @@ export default function App() {
         )}
 
         {currentTab === 'inventario' && (
-          <ScrollView contentContainerStyle={styles.scrollPadding}>
+          <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>📦 Control de Inventario</Text>
             <View style={styles.card}>
               <Text style={styles.subSectionTitle}>Nuevo Producto</Text>
@@ -305,7 +312,7 @@ export default function App() {
         )}
 
         {currentTab === 'usuarios' && (
-          <ScrollView contentContainerStyle={styles.scrollPadding}>
+          <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>👥 Gestión de Personal</Text>
             <View style={styles.card}>
               <Text style={styles.subSectionTitle}>Registrar Empleado</Text>
@@ -339,7 +346,6 @@ export default function App() {
         )}
       </View>
 
-      {/* Menú de Navegación Inferior */}
       <View style={styles.navbar}>
         <TouchableOpacity style={[styles.navButton, currentTab === 'caja' && styles.navActive]} onPress={() => setCurrentTab('caja')}>
           <Text style={[styles.navText, currentTab === 'caja' && styles.navActiveText]}>🛒 Caja</Text>
