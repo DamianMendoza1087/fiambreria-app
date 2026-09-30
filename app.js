@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, fetchEmployeePerformance, compareEmployeesMetrics, fetchMRPStats } from './api';
+import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, fetchEmployeePerformance, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots } from './api';
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -27,9 +27,10 @@ export default function App() {
   const [searchQueryCashier, setSearchQueryCashier] = useState('');
   const [searchQueryStock, setSearchQueryStock] = useState('');
 
-  // Auditoría
+  // Auditoría y Lotes
   const [selectedAuditProd, setSelectedAuditProd] = useState(null);
   const [countedQtyInput, setCountedQtyInput] = useState('');
+  const [selectedProdLots, setSelectedProdLots] = useState([]);
 
   // Ingreso / Edición de Producto
   const [editingProductId, setEditingProductId] = useState(null);
@@ -41,6 +42,9 @@ export default function App() {
   const [prodStock, setProdStock] = useState('');
   const [prodUnitType, setProdUnitType] = useState('unid');
   const [prodBarcode, setProdBarcode] = useState('');
+  const [prodExpirationDate, setProdExpirationDate] = useState('');
+  const [prodMinMargin, setProdMinMargin] = useState('30');
+  const [prodIsActive, setProdIsActive] = useState(true);
 
   // Cámara / Escáner
   const [permission, requestPermission] = useCameraPermissions();
@@ -84,6 +88,9 @@ export default function App() {
   const [mrpDays, setMrpDays] = useState('7');
   const [mrpTargetDays, setMrpTargetDays] = useState('3');
 
+  // CENTRO DE ALERTAS
+  const [systemAlerts, setSystemAlerts] = useState([]);
+
   const loadInitialData = async () => {
     try {
       setProducts(await fetchProducts());
@@ -95,6 +102,7 @@ export default function App() {
       }
       setPendingPreSales(await fetchPendingPreSales());
       setCashStatus(await fetchCashSessionStatus());
+      setSystemAlerts(await fetchSystemAlerts());
 
       const currentUser = users.find(u => u.email === email);
       if (currentUser) {
@@ -123,6 +131,7 @@ export default function App() {
     if (tabName === 'verificacion') loadCashAudits();
     else if (tabName === 'rrhh') loadHRData();
     else if (tabName === 'mrp') loadMRPData();
+    else if (tabName === 'alertas') loadAlertsData();
     await loadInitialData();
   };
 
@@ -131,7 +140,7 @@ export default function App() {
       setLoading(true);
       setCashAuditsList(await fetchCashAuditsByDate(selectedAuditDate));
     } catch (e) {
-      alert('Error cargando auditorías de caja');
+      alert('Error cargando arqueos');
     } finally {
       setLoading(false);
     }
@@ -143,21 +152,31 @@ export default function App() {
       setWorkLogs(await fetchWorkLogs());
       setUsersList(await fetchUsers());
     } catch (e) {
-      alert('Error al obtener datos de RRHH');
+      alert('Error en RRHH');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadAlertsData = async () => {
+    try {
+      setLoading(true);
+      setSystemAlerts(await fetchSystemAlerts());
+    } catch (e) {
+      alert('Error cargando alertas');
     } finally {
       setLoading(false);
     }
   };
 
   const handleCompareEmployees = async () => {
-    if (!empCompare1 || !empCompare2) return alert('Seleccioná dos empleados para comparar');
-    if (empCompare1 === empCompare2) return alert('Seleccioná dos empleados distintos');
+    if (!empCompare1 || !empCompare2) return alert('Seleccioná dos empleados');
+    if (empCompare1 === empCompare2) return alert('Seleccioná empleados distintos');
     try {
       setLoading(true);
-      const res = await compareEmployeesMetrics(empCompare1, empCompare2, 30);
-      setComparisonResult(res);
+      setComparisonResult(await compareEmployeesMetrics(empCompare1, empCompare2, 30));
     } catch (e) {
-      alert('Error en la comparativa de empleados');
+      alert('Error en comparativa');
     } finally {
       setLoading(false);
     }
@@ -170,7 +189,7 @@ export default function App() {
       const t = parseInt(mrpTargetDays) || 3;
       setMrpSuggestions(await fetchMRPStats(d, t));
     } catch (e) {
-      alert('Error cargando sugerencias de MRP');
+      alert('Error en sugerencias MRP');
     } finally {
       setLoading(false);
     }
@@ -188,10 +207,9 @@ export default function App() {
       setCanCaja(res.can_caja);
       setCanStock(res.can_stock);
       setCanIngreso(res.can_ingreso ?? true);
-      
       await loadInitialData();
     } catch (e) {
-      alert('Error de inicio de sesión: ' + e.message);
+      alert('Error de login: ' + e.message);
     } finally {
       setLoading(false);
     }
@@ -204,23 +222,23 @@ export default function App() {
   };
 
   const handleOpenCash = async () => {
-    if (!initialCashInput) return alert('Ingresá el monto inicial de caja');
+    if (!initialCashInput) return alert('Ingresá el monto inicial');
     try {
       setLoading(true);
       const val = parseFloat(initialCashInput.replace(',', '.'));
       await openCashSession(val, email);
-      alert('✅ Caja abierta correctamente. Podés comenzar a cobrar.');
+      alert('✅ Caja abierta correctamente.');
       setInitialCashInput('');
       await loadInitialData();
     } catch (e) {
-      alert('Error al abrir la caja: ' + e.message);
+      alert('Error al abrir caja');
     } finally {
       setLoading(false);
     }
   };
 
   const handleCloseCash = async () => {
-    if (!closeCashInput) return alert('Ingresá el monto final en efectivo contado');
+    if (!closeCashInput) return alert('Ingresá el monto contado');
     try {
       setLoading(true);
       const val = parseFloat(closeCashInput.replace(',', '.'));
@@ -228,21 +246,14 @@ export default function App() {
 
       if (res.status === 'mismatch_first_attempt') {
         alert(res.message);
-        setCloseAttempt(2);
-        setCloseCashInput('');
+        setCloseAttempt(2); setCloseCashInput('');
       } else {
-        if (res.is_correct) {
-          alert(`✅ ${res.message}`);
-        } else {
-          alert(`⚠️ Arqueo finalizado: ${res.message}`);
-        }
-        setShowCloseModal(false);
-        setCloseCashInput('');
-        setCloseAttempt(1);
+        alert(res.is_correct ? `✅ ${res.message}` : `⚠️ Arqueo finalizado: ${res.message}`);
+        setShowCloseModal(false); setCloseCashInput(''); setCloseAttempt(1);
         await loadInitialData();
       }
     } catch (e) {
-      alert('Error al cerrar caja: ' + e.message);
+      alert('Error al cerrar caja');
     } finally {
       setLoading(false);
     }
@@ -251,54 +262,44 @@ export default function App() {
   const toggleCamera = async (targetModule) => {
     if (!permission?.granted) {
       const res = await requestPermission();
-      if (!res.granted) {
-        alert('Se requieren permisos de cámara para escanear.');
-        return;
-      }
+      if (!res.granted) return alert('Se requieren permisos de cámara.');
     }
     if (showCamera && cameraTarget === targetModule) {
-      setShowCamera(false);
-      setCameraTarget(null);
+      setShowCamera(false); setCameraTarget(null);
     } else {
-      setCameraTarget(targetModule);
-      setShowCamera(true);
+      setCameraTarget(targetModule); setShowCamera(true);
     }
   };
 
   const handleBarcodeScanned = ({ data }) => {
-    setScanned(true);
-    setShowCamera(false);
+    setScanned(true); setShowCamera(false);
 
     if (cameraTarget === 'ingreso') {
-      setProdBarcode(data);
-      alert(`✅ Código EAN capturado: ${data}`);
+      setProdBarcode(data); alert(`✅ Código EAN capturado: ${data}`);
     } else if (cameraTarget === 'preventa') {
-      const found = products.find(p => p.barcode === data);
-      if (found) {
-        addToVendorCart(found);
-        alert(`✅ Agregado a Pre-venta: ${found.name}`);
-      } else {
-        alert(`⚠️ Código EAN ${data} no encontrado.`);
-      }
+      const found = products.find(p => p.barcode === data && p.is_active);
+      if (found) { addToVendorCart(found); alert(`✅ Agregado: ${found.name}`); }
+      else alert(`⚠️ EAN ${data} no encontrado o inactivo.`);
     } else if (cameraTarget === 'caja') {
-      const found = products.find(p => p.barcode === data);
-      if (found) {
-        addToCashierCart(found);
-        alert(`✅ Agregado a Caja: ${found.name}`);
-      } else {
-        alert(`⚠️ Código EAN ${data} no encontrado.`);
-      }
+      const found = products.find(p => p.barcode === data && p.is_active);
+      if (found) { addToCashierCart(found); alert(`✅ Agregado a Caja: ${found.name}`); }
+      else alert(`⚠️ EAN ${data} no encontrado o inactivo.`);
     } else if (cameraTarget === 'stock') {
       const found = products.find(p => p.barcode === data);
-      if (found) {
-        setSelectedAuditProd(found);
-        alert(`🎯 Producto seleccionado para conteo: ${found.name}`);
-      } else {
-        alert(`⚠️ Código EAN ${data} no encontrado.`);
-      }
+      if (found) { handleSelectProductForAudit(found); alert(`🎯 Seleccionado: ${found.name}`); }
+      else alert(`⚠️ EAN ${data} no encontrado.`);
     }
-
     setTimeout(() => setScanned(false), 2000);
+  };
+
+  const handleSelectProductForAudit = async (prod) => {
+    setSelectedAuditProd(prod);
+    try {
+      const lots = await fetchProductLots(prod.id);
+      setSelectedProdLots(lots);
+    } catch (e) {
+      setSelectedProdLots([]);
+    }
   };
 
   const handleSaveAudit = async () => {
@@ -307,13 +308,11 @@ export default function App() {
       setLoading(true);
       const val = parseFloat(countedQtyInput.replace(',', '.'));
       await submitStockAudit(selectedAuditProd.id, val, email);
-      alert(`✅ Conteo registrado para ${selectedAuditProd.name}: ${val} ${selectedAuditProd.unit_type}`);
-      setSelectedAuditProd(null);
-      setCountedQtyInput('');
-      setSearchQueryStock('');
+      alert(`✅ Conteo guardado para ${selectedAuditProd.name}: ${val} ${selectedAuditProd.unit_type}`);
+      setSelectedAuditProd(null); setCountedQtyInput(''); setSearchQueryStock('');
       await loadInitialData();
     } catch (e) {
-      alert('Error al registrar conteo');
+      alert('Error guardando conteo');
     } finally {
       setLoading(false);
     }
@@ -329,11 +328,8 @@ export default function App() {
       return alert(`⚠️ Stock insuficiente. Solo quedan ${prod.stock} ${prod.unit_type} disponibles.`);
     }
 
-    if (existing) {
-      setVendorCart(vendorCart.map(i => i.id === prod.id ? { ...i, qty: newQty } : i));
-    } else {
-      setVendorCart([...vendorCart, { ...prod, qty: step }]);
-    }
+    if (existing) setVendorCart(vendorCart.map(i => i.id === prod.id ? { ...i, qty: newQty } : i));
+    else setVendorCart([...vendorCart, { ...prod, qty: step }]);
     setSearchQueryVendor('');
   };
 
@@ -344,11 +340,7 @@ export default function App() {
         const step = item.unit_type === 'kg' ? 0.25 : 1;
         const newQty = item.qty + (delta * step);
         const maxStock = prod ? prod.stock : 999;
-
-        if (newQty > maxStock) {
-          alert(`⚠️ No podés superar el stock disponible (${maxStock} ${item.unit_type})`);
-          return item;
-        }
+        if (newQty > maxStock) { alert(`⚠️ Supera el stock disponible (${maxStock})`); return item; }
         return newQty > 0 ? { ...item, qty: newQty } : null;
       }
       return item;
@@ -363,9 +355,7 @@ export default function App() {
 
     setVendorCart(vendorCart.map(item => {
       if (item.id === id) {
-        if (val > maxStock) {
-          alert(`⚠️ Supera el stock disponible (${maxStock} ${item.unit_type}).`);
-        }
+        if (val > maxStock) alert(`⚠️ Supera el stock disponible (${maxStock}).`);
         return { ...item, qty: cleanVal };
       }
       return item;
@@ -373,16 +363,16 @@ export default function App() {
   };
 
   const handleGeneratePreSale = async () => {
-    if (vendorCart.length === 0) return alert('El carrito de pre-venta está vacío');
+    if (vendorCart.length === 0) return alert('El carrito está vacío');
     try {
       setLoading(true);
       const items = vendorCart.map(i => ({ product_id: i.id, quantity: parseFloat(i.qty) || 0 }));
       const res = await createPreSale({ items, created_by: email });
-      alert(`✅ Pre-venta #${res.presale_id} generada correctamente`);
+      alert(`✅ Pre-venta #${res.presale_id} generada`);
       setVendorCart([]);
       await loadInitialData();
     } catch (e) {
-      alert('Error al generar pre-venta');
+      alert('Error en pre-venta');
     } finally {
       setLoading(false);
     }
@@ -409,10 +399,7 @@ export default function App() {
       setLoading(true);
       await deletePreSale(psId);
       alert(`🗑️ Pre-venta #${psId} cancelada`);
-      if (selectedPreSaleId === psId) {
-        setSelectedPreSaleId(null);
-        setCashierCart([]);
-      }
+      if (selectedPreSaleId === psId) { setSelectedPreSaleId(null); setCashierCart([]); }
       await loadInitialData();
     } catch (e) {
       alert('Error al cancelar pre-venta');
@@ -429,11 +416,7 @@ export default function App() {
         const currentNum = parseFloat(item.qty) || 0;
         const newQty = currentNum + (delta * step);
         const maxStock = prod ? prod.stock : 999;
-
-        if (newQty > maxStock) {
-          alert(`⚠️ No podés superar el stock disponible (${maxStock} ${item.unit_type})`);
-          return item;
-        }
+        if (newQty > maxStock) { alert(`⚠️ Supera el stock disponible (${maxStock})`); return item; }
         return newQty > 0 ? { ...item, qty: newQty } : null;
       }
       return item;
@@ -448,9 +431,7 @@ export default function App() {
 
     setCashierCart(cashierCart.map(item => {
       if (item.id === id) {
-        if (val > maxStock) {
-          alert(`⚠️ Supera el stock disponible (${maxStock} ${item.unit_type}).`);
-        }
+        if (val > maxStock) alert(`⚠️ Supera el stock disponible (${maxStock}).`);
         return { ...item, qty: cleanVal };
       }
       return item;
@@ -463,15 +444,10 @@ export default function App() {
     const currentQty = existing ? (parseFloat(existing.qty) || 0) : 0;
     const newQty = currentQty + step;
 
-    if (newQty > prod.stock) {
-      return alert(`⚠️ Stock insuficiente. Solo quedan ${prod.stock} ${prod.unit_type} disponibles.`);
-    }
+    if (newQty > prod.stock) return alert(`⚠️ Stock insuficiente. Solo quedan ${prod.stock} ${prod.unit_type}.`);
 
-    if (existing) {
-      setCashierCart(cashierCart.map(i => i.id === prod.id ? { ...i, qty: newQty } : i));
-    } else {
-      setCashierCart([...cashierCart, { ...prod, qty: step, price_per_unit: prod.price_per_unit }]);
-    }
+    if (existing) setCashierCart(cashierCart.map(i => i.id === prod.id ? { ...i, qty: newQty } : i));
+    else setCashierCart([...cashierCart, { ...prod, qty: step, price_per_unit: prod.price_per_unit }]);
     setSearchQueryCashier('');
   };
 
@@ -480,10 +456,7 @@ export default function App() {
   const getRequiredCash = () => {
     const total = parseFloat(getCashierTotal()) || 0;
     if (paymentMethod === 'Efectivo') return total;
-    if (paymentMethod === 'Mixto') {
-      const mpVal = parseFloat(amountMP) || 0;
-      return Math.max(0, total - mpVal);
-    }
+    if (paymentMethod === 'Mixto') return Math.max(0, total - (parseFloat(amountMP) || 0));
     return 0;
   };
 
@@ -495,29 +468,21 @@ export default function App() {
   };
 
   const handleFinalizeSale = async () => {
-    if (!cashStatus.is_open) return alert('⚠️️ Debes abrir la caja antes de procesar ventas.');
-    if (cashierCart.length === 0) return alert('No hay productos en el ticket de caja');
+    if (!cashStatus.is_open) return alert('⚠ Debes abrir la caja antes de procesar ventas.');
+    if (cashierCart.length === 0) return alert('Ticket de caja vacío');
     const total = parseFloat(getCashierTotal());
     let cash = 0, mp = 0;
 
     if (paymentMethod === 'Efectivo') {
       cash = total;
-      const tendered = parseFloat(cashTendered) || 0;
-      if (tendered < total) {
-        return alert(`⚠️ El dinero ingresado ($${tendered}) es menor que el total ($${total})`);
-      }
+      if ((parseFloat(cashTendered) || 0) < total) return alert(`⚠️ Dinero ingresado menor que el total`);
     } else if (paymentMethod === 'Mercado Pago') {
       mp = total;
     } else {
       mp = parseFloat(amountMP) || 0;
-      if (mp > total) {
-        return alert(`⚠️ El monto de Mercado Pago ($${mp}) no puede superar el total ($${total})`);
-      }
+      if (mp > total) return alert(`⚠️ Monto MP supera el total`);
       cash = total - mp;
-      const tendered = parseFloat(cashTendered) || 0;
-      if (cash > 0 && tendered < cash) {
-        return alert(`⚠️ El dinero ingresado ($${tendered}) es menor que el saldo en efectivo ($${cash.toFixed(2)})`);
-      }
+      if (cash > 0 && (parseFloat(cashTendered) || 0) < cash) return alert(`⚠️️ Dinero ingresado menor que el saldo efectivo`);
     }
 
     try {
@@ -531,10 +496,8 @@ export default function App() {
         payment_method: paymentMethod,
         sold_by: email
       });
-      alert(`💳 Venta cobrada con éxito!\nVuelto a entregar en efectivo: $${getChangeDue()}`);
-      setSelectedPreSaleId(null);
-      setCashierCart([]);
-      setAmountMP(''); setCashTendered('');
+      alert(`💳 Venta cobrada con éxito!\nVuelto en efectivo: $${getChangeDue()}`);
+      setSelectedPreSaleId(null); setCashierCart([]); setAmountMP(''); setCashTendered('');
       await loadInitialData();
     } catch (e) {
       alert('Error procesando cobro');
@@ -553,11 +516,14 @@ export default function App() {
     setProdStock(String(prod.stock));
     setProdUnitType(prod.unit_type || 'unid');
     setProdBarcode(prod.barcode || '');
+    setProdMinMargin(prod.min_margin_percent ? String(prod.min_margin_percent) : '30');
+    setProdIsActive(prod.is_active);
+    setProdExpirationDate('');
   };
 
   const handleCancelEditProduct = () => {
     setEditingProductId(null);
-    setProdName(''); setProdCost(''); setProdPrice(''); setProdSupplier(''); setProdStock(''); setProdBarcode(''); setProdUnitType('unid');
+    setProdName(''); setProdCost(''); setProdPrice(''); setProdSupplier(''); setProdStock(''); setProdBarcode(''); setProdExpirationDate(''); setProdMinMargin('30'); setProdUnitType('unid'); setProdIsActive(true);
   };
 
   const handleSaveProduct = async () => {
@@ -573,21 +539,23 @@ export default function App() {
         unit_type: prodUnitType,
         stock: parseFloat(prodStock.replace(',', '.')),
         barcode: prodBarcode || null,
-        is_active: true
+        is_active: prodIsActive,
+        expiration_date: prodExpirationDate || null,
+        min_margin_percent: parseFloat(prodMinMargin.replace(',', '.')) || 30.0
       };
 
       if (editingProductId) {
         await updateProduct(editingProductId, payload);
-        alert('✅ Producto actualizado correctamente');
+        alert('✅ Producto actualizado');
       } else {
         await createProduct(payload);
-        alert('✅ Producto ingresado correctamente');
+        alert('✅ Producto/Lote ingresado correctamente');
       }
 
       handleCancelEditProduct();
       await loadInitialData();
     } catch (e) {
-      alert('Error al guardar/actualizar producto');
+      alert('Error guardando producto');
     } finally {
       setLoading(false);
     }
@@ -599,7 +567,7 @@ export default function App() {
       await deleteProduct(id);
       await loadInitialData();
     } catch (e) {
-      alert('Error al eliminar');
+      alert('Error al desactivar');
     } finally {
       setLoading(false);
     }
@@ -612,9 +580,9 @@ export default function App() {
       await createUser({ name: newUserName, email: newUserEmail, password: newUserPass });
       setNewUserName(''); setNewUserEmail(''); setNewUserPass('');
       await loadInitialData();
-      alert('Empleado registrado. Habilitale la jornada en RRHH.');
+      alert('Empleado registrado.');
     } catch (e) {
-      alert('Error al registrar usuario');
+      alert('Error creando usuario');
     } finally {
       setLoading(false);
     }
@@ -634,7 +602,7 @@ export default function App() {
       await loadInitialData();
       if (permKey === 'is_active') loadHRData();
     } catch (e) {
-      alert('Error al actualizar permisos del usuario');
+      alert('Error actualizando permisos');
     } finally {
       setLoading(false);
     }
@@ -661,7 +629,7 @@ export default function App() {
         <View style={styles.loginCard}>
           <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#dc3545', textAlign: 'center', marginBottom: 10 }}>🔒 Jornada No Habilitada</Text>
           <Text style={{ textAlign: 'center', color: '#555', marginBottom: 20 }}>
-            Tu usuario aún no ha sido habilitado para iniciar el turno por el Dueño/Admin.
+            Tu usuario aún no ha sido habilitado para iniciar el turno.
           </Text>
           <TouchableOpacity style={styles.buttonDanger} onPress={handleLogout}>
             <Text style={styles.buttonText}>Cerrar Sesión</Text>
@@ -670,8 +638,9 @@ export default function App() {
       </SafeAreaView>
     );
   }
-const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.filter(p => p.name.toLowerCase().includes(searchQueryVendor.toLowerCase()));
-  const filteredProductsCashier = searchQueryCashier.trim() === '' ? [] : products.filter(p => p.name.toLowerCase().includes(searchQueryCashier.toLowerCase()));
+const activeProducts = products.filter(p => p.is_active);
+  const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : activeProducts.filter(p => p.name.toLowerCase().includes(searchQueryVendor.toLowerCase()));
+  const filteredProductsCashier = searchQueryCashier.trim() === '' ? [] : activeProducts.filter(p => p.name.toLowerCase().includes(searchQueryCashier.toLowerCase()));
   const filteredProductsStock = searchQueryStock.trim() === '' ? [] : products.filter(p => p.name.toLowerCase().includes(searchQueryStock.toLowerCase()) || (p.barcode && p.barcode.includes(searchQueryStock)));
 
   return (
@@ -768,19 +737,19 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
               <View style={styles.card}>
                 <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#dc3545', textAlign: 'center', marginBottom: 10 }}>🔴 Caja Cerrada</Text>
                 <Text style={{ color: '#555', textAlign: 'center', marginBottom: 15 }}>
-                  Ingresá el **Fondo Fijo / Monto Inicial en Efectivo** para dar inicio a las ventas de la jornada:
+                  Ingresá el Fondo Fijo inicial en efectivo:
                 </Text>
 
                 <TextInput
                   style={styles.inputHighlight}
-                  placeholder="Monto Inicial en Efectivo ($)"
+                  placeholder="Monto Inicial ($)"
                   keyboardType="numeric"
                   value={initialCashInput}
                   onChangeText={setInitialCashInput}
                 />
 
                 <TouchableOpacity style={styles.buttonSuccess} onPress={handleOpenCash} disabled={loading}>
-                  <Text style={styles.buttonText}>🔓 Abrir Caja e Iniciar Jornada</Text>
+                  <Text style={styles.buttonText}>🔓 Abrir Caja</Text>
                 </TouchableOpacity>
               </View>
             ) : (
@@ -788,7 +757,7 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#d4edda', padding: 12, borderRadius: 8, marginBottom: 15 }}>
                   <View>
                     <Text style={{ fontWeight: 'bold', color: '#155724' }}>🟢 CAJA ABIERTA</Text>
-                    <Text style={{ fontSize: 11, color: '#155724' }}>Abierta por: {cashStatus.opened_by} ({cashStatus.opened_at}) | Fondo: ${cashStatus.initial_amount}</Text>
+                    <Text style={{ fontSize: 11, color: '#155724' }}>{cashStatus.opened_by} ({cashStatus.opened_at}) | Fondo: ${cashStatus.initial_amount}</Text>
                   </View>
                   <TouchableOpacity style={{ backgroundColor: '#dc3545', padding: 8, borderRadius: 6 }} onPress={() => setShowCloseModal(true)}>
                     <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 11 }}>🔒 Arqueo / Cierre</Text>
@@ -799,9 +768,6 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
                   <View style={{ backgroundColor: '#fff3cd', padding: 15, borderRadius: 10, borderWidth: 1, borderColor: '#ffeeba', marginBottom: 15 }}>
                     <Text style={{ fontWeight: 'bold', fontSize: 16, color: '#856404', marginBottom: 6 }}>
                       🔒 Cierre Único de Caja a Ciegas
-                    </Text>
-                    <Text style={{ fontSize: 12, color: '#856404', marginBottom: 10 }}>
-                      Ingresá el total de dinero en **Efectivo** contado en la caja:
                     </Text>
 
                     <TextInput
@@ -825,7 +791,7 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
 
                 <Text style={styles.subSectionTitle}>Pre-ventas Pendientes:</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 15 }}>
-                  {pendingPreSales.length === 0 ? <Text style={styles.emptyText}>No hay pre-ventas pendientes.</Text> : (
+                  {pendingPreSales.length === 0 ? <Text style={styles.emptyText}>Sin pre-ventas pendientes.</Text> : (
                     pendingPreSales.map(ps => (
                       <View key={ps.id} style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <TouchableOpacity 
@@ -852,7 +818,7 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
                 </ScrollView>
 
                 <TouchableOpacity style={styles.buttonCamera} onPress={() => toggleCamera('caja')}>
-                  <Text style={styles.buttonText}>{showCamera && cameraTarget === 'caja' ? '📷 Cerrar Escáner' : '📷 Agregar con Escáner EAN'}</Text>
+                  <Text style={styles.buttonText}>{showCamera && cameraTarget === 'caja' ? '📷 Cerrar Escáner' : '📷 Escanear Producto EAN'}</Text>
                 </TouchableOpacity>
 
                 {showCamera && cameraTarget === 'caja' && permission?.granted && (
@@ -862,18 +828,11 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
                 )}
 
                 <Text style={styles.subSectionTitle}>🔍 Agregar Producto Adicional:</Text>
-                <TextInput
-                  style={styles.searchInput}
-                  placeholder="Buscar para agregar al ticket..."
-                  value={searchQueryCashier}
-                  onChangeText={setSearchQueryCashier}
-                />
+                <TextInput style={styles.searchInput} placeholder="Buscar producto..." value={searchQueryCashier} onChangeText={setSearchQueryCashier} />
 
                 {searchQueryCashier.trim() !== '' && (
                   <View style={styles.dropdownContainer}>
-                    {filteredProductsCashier.length === 0 ? (
-                      <Text style={{ padding: 10, color: '#888' }}>No se encontraron coincidencias.</Text>
-                    ) : (
+                    {filteredProductsCashier.length === 0 ? <Text style={{ padding: 10, color: '#888' }}>Sin coincidencias.</Text> : (
                       filteredProductsCashier.map(p => (
                         <TouchableOpacity key={p.id} style={styles.dropdownItem} onPress={() => addToCashierCart(p)}>
                           <Text style={{ fontWeight: 'bold' }}>{p.name}</Text>
@@ -884,7 +843,7 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
                   </View>
                 )}
 
-                <Text style={styles.subSectionTitle}>Edición de Ticket en Caja:</Text>
+                <Text style={styles.subSectionTitle}>Edición de Ticket:</Text>
                 {cashierCart.length === 0 ? <Text style={styles.emptyText}>Seleccioná una pre-venta o agregá productos.</Text> : (
                   cashierCart.map(i => (
                     <View key={i.id} style={styles.cartRow}>
@@ -895,12 +854,7 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
                           <Text style={{ color: '#fff', fontWeight: 'bold' }}>-</Text>
                         </TouchableOpacity>
                         
-                        <TextInput
-                          style={styles.inputSmall}
-                          keyboardType="numeric"
-                          value={String(i.qty)}
-                          onChangeText={(val) => updateCashierCartDirectQty(i.id, val)}
-                        />
+                        <TextInput style={styles.inputSmall} keyboardType="numeric" value={String(i.qty)} onChangeText={(val) => updateCashierCartDirectQty(i.id, val)} />
 
                         <TouchableOpacity style={styles.qtyBtn} onPress={() => updateCashierCartQty(i.id, 1)}>
                           <Text style={{ color: '#fff', fontWeight: 'bold' }}>+</Text>
@@ -924,15 +878,9 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
                 {paymentMethod === 'Mixto' && (
                   <View style={styles.card}>
                     <Text style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 5 }}>📱 Cobro con Mercado Pago:</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Monto a cobrar por MP ($)"
-                      keyboardType="numeric"
-                      value={amountMP}
-                      onChangeText={setAmountMP}
-                    />
+                    <TextInput style={styles.input} placeholder="Monto MP ($)" keyboardType="numeric" value={amountMP} onChangeText={setAmountMP} />
                     <Text style={{ fontSize: 13, color: '#007bff', fontWeight: 'bold', marginTop: 4 }}>
-                      💵 Restante a cobrar en Efectivo: ${getRequiredCash().toFixed(2)}
+                      💵 Restante en Efectivo: ${getRequiredCash().toFixed(2)}
                     </Text>
                   </View>
                 )}
@@ -940,18 +888,12 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
                 {(paymentMethod === 'Efectivo' || paymentMethod === 'Mixto') && (
                   <View style={styles.changeCard}>
                     <Text style={{ fontWeight: 'bold', fontSize: 13, color: '#333', marginBottom: 6 }}>
-                      💵 Paga con Billete/Efectivo: (Requerido: ${getRequiredCash().toFixed(2)})
+                      💵 Paga con Efectivo: (Requerido: ${getRequiredCash().toFixed(2)})
                     </Text>
-                    <TextInput
-                      style={styles.inputHighlight}
-                      placeholder={`Ej: ${getRequiredCash().toFixed(2)}`}
-                      keyboardType="numeric"
-                      value={cashTendered}
-                      onChangeText={setCashTendered}
-                    />
+                    <TextInput style={styles.inputHighlight} placeholder={`Ej: ${getRequiredCash().toFixed(2)}`} keyboardType="numeric" value={cashTendered} onChangeText={setCashTendered} />
                     
                     <View style={styles.changeRow}>
-                      <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#155724' }}>💰 Vuelto en Efectivo:</Text>
+                      <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#155724' }}>💰 Vuelto:</Text>
                       <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#28a745' }}>${getChangeDue()}</Text>
                     </View>
                   </View>
@@ -970,12 +912,42 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
           </ScrollView>
         )}
 
-        {/* MÓDULO RRHH - HABILIACIÓN, FICHAJE Y COMPARATIVA */}
+        {/* MÓDULO DE ALERTAS INTELIGENTES */}
+        {currentTab === 'alertas' && (userRole === 'superadmin' || userRole === 'dueno') && (
+          <ScrollView contentContainerStyle={styles.scrollPadding}>
+            <Text style={styles.sectionTitle}>🚨 Centro de Alertas Críticas</Text>
+            
+            <TouchableOpacity style={styles.buttonPrimary} onPress={loadAlertsData} disabled={loading}>
+              <Text style={styles.buttonText}>🔄 Actualizar Alertas</Text>
+            </TouchableOpacity>
+
+            <Text style={styles.subSectionTitle}>Notificaciones del Sistema ({systemAlerts.length})</Text>
+            {systemAlerts.length === 0 ? (
+              <Text style={styles.emptyText}>🎉 No hay alertas críticas registradas. Todo funciona con normalidad.</Text>
+            ) : (
+              systemAlerts.map(alert => {
+                let bgColor = '#fff3cd';
+                let borderColor = '#ffeeba';
+                if (alert.level === 'CRITICAL') { bgColor = '#f8d7da'; borderColor = '#f5c6cb'; }
+                if (alert.level === 'HIGH') { bgColor = '#e2e3e5'; borderColor = '#d6d8db'; }
+
+                return (
+                  <View key={alert.id} style={[styles.card, { backgroundColor: bgColor, borderColor: borderColor, borderWidth: 1 }]}>
+                    <Text style={{ fontWeight: 'bold', fontSize: 15, color: '#333' }}>{alert.title}</Text>
+                    <Text style={{ fontSize: 12, color: '#555', marginTop: 4 }}>{alert.detail}</Text>
+                  </View>
+                );
+              })
+            )}
+          </ScrollView>
+        )}
+
+        {/* RRHH */}
         {currentTab === 'rrhh' && (userRole === 'superadmin' || userRole === 'dueno') && (
           <ScrollView contentContainerStyle={styles.scrollPadding}>
             <Text style={styles.sectionTitle}>👨‍💼 RRHH, Fichaje y Rendimiento</Text>
 
-            <Text style={styles.subSectionTitle}>Habilitación Diaria y Fichaje de Turno</Text>
+            <Text style={styles.subSectionTitle}>Habilitación Diaria y Fichaje</Text>
             {usersList.filter(u => u.role !== 'superadmin').map(u => (
               <View key={u.id} style={styles.card}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -996,21 +968,14 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
               </View>
             ))}
 
-            {/* SECCIÓN COMPARATIVA DE EMPLEADOS */}
             <View style={[styles.card, { marginTop: 10 }]}>
-              <Text style={styles.subSectionTitle}>⚖️ Comparativa de Desempeño (Últimos 30 días)</Text>
+              <Text style={styles.subSectionTitle}>⚖️️ Comparativa de Desempeño</Text>
               
               <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#555' }}>Empleado 1:</Text>
               <View style={{ borderBottomWidth: 1, borderBottomColor: '#ccc', marginBottom: 10 }}>
                 {usersList.map(u => (
-                  <TouchableOpacity 
-                    key={`emp1-${u.id}`} 
-                    style={{ padding: 6, backgroundColor: empCompare1 === u.email ? '#e8f4f8' : '#fff' }}
-                    onPress={() => setEmpCompare1(u.email)}
-                  >
-                    <Text style={{ fontWeight: empCompare1 === u.email ? 'bold' : 'normal', color: empCompare1 === u.email ? '#007bff' : '#333' }}>
-                      {u.name} ({u.email})
-                    </Text>
+                  <TouchableOpacity key={`emp1-${u.id}`} style={{ padding: 6, backgroundColor: empCompare1 === u.email ? '#e8f4f8' : '#fff' }} onPress={() => setEmpCompare1(u.email)}>
+                    <Text style={{ fontWeight: empCompare1 === u.email ? 'bold' : 'normal', color: empCompare1 === u.email ? '#007bff' : '#333' }}>{u.name} ({u.email})</Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -1018,14 +983,8 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
               <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#555' }}>Empleado 2:</Text>
               <View style={{ borderBottomWidth: 1, borderBottomColor: '#ccc', marginBottom: 10 }}>
                 {usersList.map(u => (
-                  <TouchableOpacity 
-                    key={`emp2-${u.id}`} 
-                    style={{ padding: 6, backgroundColor: empCompare2 === u.email ? '#e8f4f8' : '#fff' }}
-                    onPress={() => setEmpCompare2(u.email)}
-                  >
-                    <Text style={{ fontWeight: empCompare2 === u.email ? 'bold' : 'normal', color: empCompare2 === u.email ? '#007bff' : '#333' }}>
-                      {u.name} ({u.email})
-                    </Text>
+                  <TouchableOpacity key={`emp2-${u.id}`} style={{ padding: 6, backgroundColor: empCompare2 === u.email ? '#e8f4f8' : '#fff' }} onPress={() => setEmpCompare2(u.email)}>
+                    <Text style={{ fontWeight: empCompare2 === u.email ? 'bold' : 'normal', color: empCompare2 === u.email ? '#007bff' : '#333' }}>{u.name} ({u.email})</Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -1036,12 +995,8 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
 
               {comparisonResult && (
                 <View style={{ marginTop: 15, backgroundColor: '#f8f9fa', padding: 12, borderRadius: 8 }}>
-                  <Text style={{ fontWeight: 'bold', fontSize: 15, color: '#007bff', textAlign: 'center', marginBottom: 10 }}>
-                    📊 Resultados Comparativos
-                  </Text>
-
+                  <Text style={{ fontWeight: 'bold', fontSize: 15, color: '#007bff', textAlign: 'center', marginBottom: 10 }}>📊 Resultados Comparativos</Text>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
-                    {/* COLUMNA EMPLEADO 1 */}
                     <View style={{ flex: 0.48, backgroundColor: '#fff', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: '#ddd' }}>
                       <Text style={{ fontWeight: 'bold', color: '#007bff' }}>{comparisonResult.emp1.name}</Text>
                       <Text style={{ fontSize: 11, marginTop: 4 }}>Ventas: <Text style={{ fontWeight: 'bold' }}>{comparisonResult.emp1.sales_count}</Text></Text>
@@ -1051,7 +1006,6 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
                       <Text style={{ fontSize: 11 }}>Dif. Caja: <Text style={{ fontWeight: 'bold', color: '#dc3545' }}>${comparisonResult.emp1.total_cash_diff}</Text></Text>
                     </View>
 
-                    {/* COLUMNA EMPLEADO 2 */}
                     <View style={{ flex: 0.48, backgroundColor: '#fff', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: '#ddd' }}>
                       <Text style={{ fontWeight: 'bold', color: '#6f42c1' }}>{comparisonResult.emp2.name}</Text>
                       <Text style={{ fontSize: 11, marginTop: 4 }}>Ventas: <Text style={{ fontWeight: 'bold' }}>{comparisonResult.emp2.sales_count}</Text></Text>
@@ -1073,7 +1027,7 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
             </View>
 
             <Text style={styles.subSectionTitle}>📋 Registro de Horas Trabajadas (Fichero)</Text>
-            {workLogs.length === 0 ? <Text style={styles.emptyText}>No hay fichajes registrados todavía.</Text> : (
+            {workLogs.length === 0 ? <Text style={styles.emptyText}>No hay fichajes registrados.</Text> : (
               workLogs.map(log => (
                 <View key={log.id} style={styles.card}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -1092,19 +1046,15 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
           </ScrollView>
         )}
 
-        {/* MÓDULO MRP - COMPRAS INTELIGENTES */}
+        {/* MRP */}
         {currentTab === 'mrp' && (userRole === 'superadmin' || userRole === 'dueno') && (
           <ScrollView contentContainerStyle={styles.scrollPadding}>
             <Text style={styles.sectionTitle}>📦 MRP: Compras Inteligentes</Text>
             
             <View style={styles.card}>
-              <Text style={{ fontSize: 12, color: '#555', marginBottom: 10 }}>
-                Analiza las ventas históricas para determinar la demanda diaria y sugerir la compra exacta de productos, evitando stock inmovilizado o faltantes.
-              </Text>
-
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
                 <View style={{ flex: 0.48 }}>
-                  <Text style={{ fontSize: 11, fontWeight: 'bold' }}>Días Análisis de Ventas:</Text>
+                  <Text style={{ fontSize: 11, fontWeight: 'bold' }}>Días Análisis Ventas:</Text>
                   <TextInput style={styles.input} keyboardType="numeric" value={mrpDays} onChangeText={setMrpDays} />
                 </View>
 
@@ -1119,43 +1069,34 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.subSectionTitle}>🛒 Reposición Recomendada de Productos</Text>
-            {mrpSuggestions.length === 0 ? (
-              <Text style={styles.emptyText}>No hay recomendaciones de compra. O bien no hubo ventas recientes o el stock cubre la demanda.</Text>
-            ) : (
-              mrpSuggestions.map((item, idx) => {
-                let badgeColor = '#28a745';
-                if (item.status === 'AGOTADO') badgeColor = '#dc3545';
-                if (item.status === 'CRÍTICO') badgeColor = '#fd7e14';
-
-                return (
-                  <View key={idx} style={styles.card}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Text style={{ fontWeight: 'bold', fontSize: 16 }}>{item.product_name}</Text>
-                      <View style={{ backgroundColor: badgeColor, padding: 4, borderRadius: 4 }}>
-                        <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>{item.status}</Text>
-                      </View>
-                    </View>
-
-                    <Text style={{ fontSize: 12, color: '#666' }}>Proveedor: {item.supplier}</Text>
-
-                    <View style={{ backgroundColor: '#f8f9fa', padding: 10, borderRadius: 8, marginTop: 8 }}>
-                      <Text style={{ fontSize: 12 }}>Stock Actual: <Text style={{ fontWeight: 'bold' }}>{item.current_stock} {item.unit_type}</Text></Text>
-                      <Text style={{ fontSize: 12 }}>Ventas en {mrpDays} días: <Text style={{ fontWeight: 'bold' }}>{item.total_sold_period} {item.unit_type}</Text></Text>
-                      <Text style={{ fontSize: 12 }}>Demanda Media Diaria: <Text style={{ fontWeight: 'bold' }}>{item.daily_demand} {item.unit_type}/día</Text></Text>
-                      
-                      <View style={{ borderTopWidth: 1, borderTopColor: '#ddd', marginTop: 6, paddingTop: 6 }}>
-                        <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#007bff' }}>
-                          💡 Sugerencia de Compra: {item.suggested_buy} {item.unit_type}
-                        </Text>
-                        <Text style={{ fontSize: 12, color: '#dc3545', fontWeight: 'bold' }}>
-                          Inversión Estimada: ${item.estimated_cost}
-                        </Text>
-                      </View>
+            <Text style={styles.subSectionTitle}>🛒 Reposición Recomendada</Text>
+            {mrpSuggestions.length === 0 ? <Text style={styles.emptyText}>Sin compras recomendadas.</Text> : (
+              mrpSuggestions.map((item, idx) => (
+                <View key={idx} style={styles.card}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={{ fontWeight: 'bold', fontSize: 16 }}>{item.product_name}</Text>
+                    <View style={{ backgroundColor: item.status === 'AGOTADO' ? '#dc3545' : '#28a745', padding: 4, borderRadius: 4 }}>
+                      <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>{item.status}</Text>
                     </View>
                   </View>
-                );
-              })
+
+                  <Text style={{ fontSize: 12, color: '#666' }}>Proveedor: {item.supplier}</Text>
+
+                  <View style={{ backgroundColor: '#f8f9fa', padding: 10, borderRadius: 8, marginTop: 8 }}>
+                    <Text style={{ fontSize: 12 }}>Stock Actual: <Text style={{ fontWeight: 'bold' }}>{item.current_stock} {item.unit_type}</Text></Text>
+                    <Text style={{ fontSize: 12 }}>Demanda Diaria: <Text style={{ fontWeight: 'bold' }}>{item.daily_demand} {item.unit_type}/día</Text></Text>
+                    
+                    <View style={{ borderTopWidth: 1, borderTopColor: '#ddd', marginTop: 6, paddingTop: 6 }}>
+                      <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#007bff' }}>
+                        💡 Sugerencia: {item.suggested_buy} {item.unit_type}
+                      </Text>
+                      <Text style={{ fontSize: 12, color: '#dc3545', fontWeight: 'bold' }}>
+                        Inversión Estimada: ${item.estimated_cost}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              ))
             )}
           </ScrollView>
         )}
@@ -1168,40 +1109,29 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
             <View style={styles.card}>
               <Text style={{ fontWeight: 'bold', marginBottom: 6 }}>Filtrar por Fecha (AAAA-MM-DD):</Text>
               <View style={{ flexDirection: 'row' }}>
-                <TextInput
-                  style={[styles.input, { flex: 1, marginBottom: 0 }]}
-                  value={selectedAuditDate}
-                  onChangeText={setSelectedAuditDate}
-                  placeholder="YYYY-MM-DD"
-                />
+                <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} value={selectedAuditDate} onChangeText={setSelectedAuditDate} placeholder="YYYY-MM-DD" />
                 <TouchableOpacity style={[styles.buttonPrimary, { marginLeft: 8, marginTop: 0 }]} onPress={loadCashAudits}>
                   <Text style={styles.buttonText}>🔍 Buscar</Text>
                 </TouchableOpacity>
               </View>
             </View>
 
-            {cashAuditsList.length === 0 ? (
-              <Text style={styles.emptyText}>No hay registros de caja para la fecha seleccionada.</Text>
-            ) : (
+            {cashAuditsList.length === 0 ? <Text style={styles.emptyText}>No hay registros de caja para la fecha.</Text> : (
               cashAuditsList.map(audit => (
                 <View key={audit.id} style={styles.card}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
                     <Text style={{ fontWeight: 'bold', fontSize: 16 }}>Jornada: {audit.date}</Text>
-                    <Text style={{ fontWeight: 'bold', color: audit.is_open ? '#28a745' : '#dc3545' }}>
-                      {audit.is_open ? '🟢 EN CURSO' : '🔴 CERRADA'}
-                    </Text>
+                    <Text style={{ fontWeight: 'bold', color: audit.is_open ? '#28a745' : '#dc3545' }}>{audit.is_open ? '🟢 EN CURSO' : '🔴 CERRADA'}</Text>
                   </View>
 
                   <Text style={{ fontSize: 12, color: '#555' }}>Apertura: {audit.opened_at} por {audit.opened_by}</Text>
                   <Text style={{ fontSize: 12, color: '#555' }}>Cierre: {audit.closed_at} por {audit.closed_by}</Text>
-                  <Text style={{ fontSize: 12, color: '#555', marginBottom: 8 }}>Tickets cobrados: {audit.total_sales_count}</Text>
 
-                  <View style={{ backgroundColor: '#f8f9fa', padding: 10, borderRadius: 8, borderLeftWidth: 4, borderLeftColor: '#007bff' }}>
+                  <View style={{ backgroundColor: '#f8f9fa', padding: 10, borderRadius: 8, borderLeftWidth: 4, borderLeftColor: '#007bff', marginTop: 8 }}>
                     <Text style={{ fontSize: 13 }}>Fondo Inicial: <Text style={{ fontWeight: 'bold' }}>${audit.initial_amount}</Text></Text>
-                    <Text style={{ fontSize: 13 }}>Total Mercado Pago: <Text style={{ fontWeight: 'bold', color: '#007bff' }}>${audit.total_mp || 0}</Text></Text>
-                    <Text style={{ fontSize: 13 }}>Efectivo Teórico Esperado: <Text style={{ fontWeight: 'bold' }}>${audit.expected_cash || 0}</Text></Text>
-                    <Text style={{ fontSize: 13 }}>Efectivo Reportado a Ciegas: <Text style={{ fontWeight: 'bold' }}>${audit.reported_cash || 0}</Text></Text>
-                    
+                    <Text style={{ fontSize: 13 }}>Total MP: <Text style={{ fontWeight: 'bold', color: '#007bff' }}>${audit.total_mp || 0}</Text></Text>
+                    <Text style={{ fontSize: 13 }}>Efectivo Esperado: <Text style={{ fontWeight: 'bold' }}>${audit.expected_cash || 0}</Text></Text>
+                    <Text style={{ fontSize: 13 }}>Efectivo Reportado: <Text style={{ fontWeight: 'bold' }}>${audit.reported_cash || 0}</Text></Text>
                     {audit.difference !== null && (
                       <Text style={{ fontSize: 14, fontWeight: 'bold', marginTop: 4, color: audit.difference === 0 ? '#28a745' : '#dc3545' }}>
                         Diferencia: ${audit.difference} ({audit.status_message})
@@ -1214,13 +1144,13 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
           </ScrollView>
         )}
 
-        {/* AUDITORÍA Y CONTROL DE STOCK */}
+        {/* AUDITORÍA Y CONTROL DE FEFO / STOCK */}
         {currentTab === 'inventario' && (canStock || userRole === 'superadmin') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
-            <Text style={styles.sectionTitle}>📦 Auditoría y Control de Inventario</Text>
+            <Text style={styles.sectionTitle}>📦 Control FEFO e Inventario</Text>
 
             <View style={styles.card}>
-              <Text style={styles.subSectionTitle}>👁️ Conteo Físico a Ciegas (Operario)</Text>
+              <Text style={styles.subSectionTitle}>👁️ Conteo y Consulta por Lotes (FEFO)</Text>
 
               <TouchableOpacity style={styles.buttonCamera} onPress={() => toggleCamera('stock')}>
                 <Text style={styles.buttonText}>{showCamera && cameraTarget === 'stock' ? '📷 Cerrar Escáner' : '📷 Escanear EAN del Producto'}</Text>
@@ -1232,43 +1162,38 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
                 </View>
               )}
 
-              <TextInput
-                style={styles.searchInput}
-                placeholder="🔍 O escribí el nombre para seleccionar..."
-                value={searchQueryStock}
-                onChangeText={setSearchQueryStock}
-              />
+              <TextInput style={styles.searchInput} placeholder="🔍 Escribí para buscar..." value={searchQueryStock} onChangeText={setSearchQueryStock} />
 
               {searchQueryStock.trim() !== '' && (
                 <View style={styles.dropdownContainer}>
-                  {filteredProductsStock.length === 0 ? (
-                    <Text style={{ padding: 10, color: '#888' }}>No se encontraron coincidencias.</Text>
-                  ) : (
-                    filteredProductsStock.map(p => (
-                      <TouchableOpacity key={p.id} style={styles.dropdownItem} onPress={() => { setSelectedAuditProd(p); setSearchQueryStock(''); }}>
-                        <Text style={{ fontWeight: 'bold' }}>{p.name}</Text>
-                        <Text style={{ color: '#666', fontSize: 11 }}>EAN: {p.barcode || 'Sin EAN'} | Categoría: {p.category}</Text>
-                      </TouchableOpacity>
-                    ))
-                  )}
+                  {filteredProductsStock.map(p => (
+                    <TouchableOpacity key={p.id} style={styles.dropdownItem} onPress={() => { handleSelectProductForAudit(p); setSearchQueryStock(''); }}>
+                      <Text style={{ fontWeight: 'bold' }}>{p.name} {!p.is_active && '(INACTIVO)'}</Text>
+                      <Text style={{ color: '#666', fontSize: 11 }}>EAN: {p.barcode || 'Sin EAN'} | Stock: {p.stock} {p.unit_type}</Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
               )}
 
               {selectedAuditProd && (
                 <View style={{ marginTop: 15, backgroundColor: '#e9ecef', padding: 12, borderRadius: 8 }}>
-                  <Text style={{ fontWeight: 'bold', fontSize: 15, color: '#007bff' }}>Producto seleccionado: {selectedAuditProd.name}</Text>
-                  <Text style={{ fontSize: 12, color: '#555', marginBottom: 8 }}>Ingresá la cantidad exacta física hallada:</Text>
+                  <Text style={{ fontWeight: 'bold', fontSize: 15, color: '#007bff' }}>Producto: {selectedAuditProd.name}</Text>
+                  <Text style={{ fontSize: 12, color: '#555', marginBottom: 8 }}>Stock Total Sistema: {selectedAuditProd.stock} {selectedAuditProd.unit_type}</Text>
                   
-                  <TextInput
-                    style={styles.inputHighlight}
-                    placeholder={`Cantidad contada (${selectedAuditProd.unit_type})`}
-                    keyboardType="numeric"
-                    value={countedQtyInput}
-                    onChangeText={setCountedQtyInput}
-                  />
+                  <Text style={{ fontWeight: 'bold', fontSize: 12, marginTop: 4 }}>📅 Lotes Activos (FEFO):</Text>
+                  {selectedProdLots.length === 0 ? <Text style={{ fontSize: 11, color: '#888' }}>Sin lotes con vencimiento cargados.</Text> : (
+                    selectedProdLots.map(l => (
+                      <View key={l.id} style={{ backgroundColor: '#fff', padding: 6, borderRadius: 4, marginTop: 4 }}>
+                        <Text style={{ fontSize: 11 }}>Lote: <Text style={{ fontWeight: 'bold' }}>{l.lot_number}</Text> | Vence: <Text style={{ fontWeight: 'bold', color: '#dc3545' }}>{l.expiration_date}</Text> | Quedan: {l.current_qty} {selectedAuditProd.unit_type}</Text>
+                      </View>
+                    ))
+                  )}
+
+                  <Text style={{ fontSize: 12, color: '#555', marginTop: 10, marginBottom: 4 }}>Ingresá el conteo físico real:</Text>
+                  <TextInput style={styles.inputHighlight} placeholder={`Cantidad (${selectedAuditProd.unit_type})`} keyboardType="numeric" value={countedQtyInput} onChangeText={setCountedQtyInput} />
 
                   <TouchableOpacity style={styles.buttonSuccess} onPress={handleSaveAudit} disabled={loading}>
-                    <Text style={styles.buttonText}>💾 Confirmar y Registrar Conteo</Text>
+                    <Text style={styles.buttonText}>💾 Confirmar Conteo</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -1276,41 +1201,22 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
 
             {(userRole === 'superadmin' || userRole === 'dueno') && (
               <View style={{ marginTop: 10 }}>
-                <Text style={styles.subSectionTitle}>📊 Control Financiero y Auditable de Stock</Text>
-                {products.map(p => {
-                  const cost = p.cost_price || 0;
-                  const price = p.price_per_unit || 0;
-                  const margin = price > 0 ? (((price - cost) / price) * 100).toFixed(1) : 0;
-
-                  return (
-                    <View key={p.id} style={styles.productCard}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ fontWeight: 'bold', fontSize: 15 }}>{p.name}</Text>
-                        <Text style={{ color: '#666', fontSize: 11 }}>Proveedor: <Text style={{ fontWeight: 'bold', color: '#333' }}>{p.supplier || 'Sin especificar'}</Text></Text>
-                        
-                        <View style={{ flexDirection: 'row', marginTop: 4 }}>
-                          <Text style={{ fontSize: 11, color: '#dc3545', fontWeight: 'bold', marginRight: 10 }}>
-                            Costo: ${cost}
-                          </Text>
-                          <Text style={{ fontSize: 11, color: '#28a745', fontWeight: 'bold', marginRight: 10 }}>
-                            PVP: ${price}
-                          </Text>
-                          <Text style={{ fontSize: 11, color: '#6f42c1', fontWeight: 'bold' }}>
-                            Margen: {margin}%
-                          </Text>
-                        </View>
-
-                        <Text style={{ color: '#666', fontSize: 11, marginTop: 4 }}>
-                          Stock Sistema: <Text style={{ fontWeight: 'bold', color: '#007bff' }}>{p.stock} {p.unit_type}</Text> | Conteo Físico: {p.last_counted_qty !== null && p.last_counted_qty !== undefined ? `${p.last_counted_qty} ${p.unit_type}` : 'Pendiente'}
-                        </Text>
-                      </View>
-
-                      <TouchableOpacity style={[styles.buttonPrimary, { padding: 8 }]} onPress={() => { setCurrentTab('ingresos'); handleStartEditProduct(p); }}>
-                        <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>✏️ Ajustar</Text>
-                      </TouchableOpacity>
+                <Text style={styles.subSectionTitle}>📊 Todos los Productos</Text>
+                {products.map(p => (
+                  <View key={p.id} style={styles.productCard}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontWeight: 'bold', fontSize: 15 }}>
+                        {p.name} {!p.is_active && <Text style={{ color: '#dc3545', fontSize: 11 }}>(INACTIVO)</Text>}
+                      </Text>
+                      <Text style={{ color: '#666', fontSize: 11 }}>PVP: ${p.price_per_unit} \vert{} Costo:${p.cost_price || 0}</Text>
+                      <Text style={{ color: '#007bff', fontSize: 11, fontWeight: 'bold' }}>Stock: {p.stock} {p.unit_type}</Text>
                     </View>
-                  );
-                })}
+
+                    <TouchableOpacity style={[styles.buttonPrimary, { padding: 8 }]} onPress={() => { setCurrentTab('ingresos'); handleStartEditProduct(p); }}>
+                      <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>✏️ Editar / Desactivar</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
               </View>
             )}
           </ScrollView>
@@ -1319,44 +1225,49 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
         {/* INGRESOS */}
         {currentTab === 'ingresos' && (canIngreso || userRole === 'superadmin' || userRole === 'dueno') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
-            <Text style={styles.sectionTitle}>📥 Ingreso de Materiales y Costos</Text>
+            <Text style={styles.sectionTitle}>📥 Ingresos y Control de Vencimiento (FEFO)</Text>
             <View style={styles.card}>
-              <Text style={styles.subSectionTitle}>
-                {editingProductId ? '✏️ Editar Producto, Costo o Precio' : '➕ Dar de Alta Nuevo Producto'}
-              </Text>
+              <Text style={styles.subSectionTitle}>{editingProductId ? '✏️️ Editar Producto o Desactivar' : '➕ Alta de Mercadería y Lote'}</Text>
               
               <TextInput style={styles.input} placeholder="Nombre del Producto" value={prodName} onChangeText={setProdName} />
-              <TextInput style={styles.input} placeholder="Categoría (ej: Fiambres, Quesos, Miel)" value={prodCategory} onChangeText={setProdCategory} />
+              <TextInput style={styles.input} placeholder="Categoría" value={prodCategory} onChangeText={setProdCategory} />
               
               {(userRole === 'superadmin' || userRole === 'dueno') && (
                 <>
-                  <TextInput style={styles.input} placeholder="Proveedor (ej: Distribuidora Pepito)" value={prodSupplier} onChangeText={setProdSupplier} />
-                  <TextInput style={styles.input} placeholder="Costo de Compra ($) - Confidencial" keyboardType="numeric" value={prodCost} onChangeText={setProdCost} />
+                  <TextInput style={styles.input} placeholder="Proveedor (ej: Distribuidora Ale)" value={prodSupplier} onChangeText={setProdSupplier} />
+                  <TextInput style={styles.input} placeholder="Costo de Compra de este Lote ($)" keyboardType="numeric" value={prodCost} onChangeText={setProdCost} />
                 </>
               )}
 
-              <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#555', marginBottom: 6 }}>Unidad de Medida / Venta:</Text>
+              <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4 }}>📅 Fecha de Vencimiento del Lote (AAAA-MM-DD):</Text>
+              <TextInput style={styles.inputHighlight} placeholder="Ej: 2026-10-31" value={prodExpirationDate} onChangeText={setProdExpirationDate} />
+
+              <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#555', marginBottom: 6 }}>Unidad de Medida:</Text>
               <View style={{ flexDirection: 'row', marginBottom: 12 }}>
-                <TouchableOpacity 
-                  style={[styles.typeBtn, prodUnitType === 'unid' && styles.typeBtnActive]} 
-                  onPress={() => setProdUnitType('unid')}
-                >
+                <TouchableOpacity style={[styles.typeBtn, prodUnitType === 'unid' && styles.typeBtnActive]} onPress={() => setProdUnitType('unid')}>
                   <Text style={{ color: prodUnitType === 'unid' ? '#fff' : '#333', fontWeight: 'bold' }}>Unidades (unid)</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity 
-                  style={[styles.typeBtn, prodUnitType === 'kg' && styles.typeBtnActive, { marginLeft: 10 }]} 
-                  onPress={() => setProdUnitType('kg')}
-                >
+                <TouchableOpacity style={[styles.typeBtn, prodUnitType === 'kg' && styles.typeBtnActive, { marginLeft: 10 }]} onPress={() => setProdUnitType('kg')}>
                   <Text style={{ color: prodUnitType === 'kg' ? '#fff' : '#333', fontWeight: 'bold' }}>Kilogramos (kg)</Text>
                 </TouchableOpacity>
               </View>
 
-              <TextInput style={styles.input} placeholder={`Precio de Venta PVP por ${prodUnitType} ($)`} keyboardType="numeric" value={prodPrice} onChangeText={setProdPrice} />
-              <TextInput style={styles.input} placeholder={`Cantidad Ingresada / Stock (${prodUnitType})`} keyboardType="numeric" value={prodStock} onChangeText={setProdStock} />
+              <TextInput style={styles.input} placeholder={`Precio PVP por ${prodUnitType} ($)`} keyboardType="numeric" value={prodPrice} onChangeText={setProdPrice} />
+              <TextInput style={styles.input} placeholder={`Cantidad de Unidades Compradas (${prodUnitType})`} keyboardType="numeric" value={prodStock} onChangeText={setProdStock} />
+              <TextInput style={styles.input} placeholder="Margen Mínimo Deseado % (por defecto 30%)" keyboardType="numeric" value={prodMinMargin} onChangeText={setProdMinMargin} />
+
+              {editingProductId && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+                  <Text style={{ fontWeight: 'bold', marginRight: 10 }}>Estado del Producto:</Text>
+                  <TouchableOpacity style={[styles.typeBtn, { backgroundColor: prodIsActive ? '#28a745' : '#dc3545' }]} onPress={() => setProdIsActive(!prodIsActive)}>
+                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>{prodIsActive ? '🟢 ACTIVO' : '🔴 INACTIVO (Descatalogado)'}</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
               
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="Código de Barras / EAN" value={prodBarcode} onChangeText={setProdBarcode} />
+                <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="Código EAN" value={prodBarcode} onChangeText={setProdBarcode} />
                 <TouchableOpacity style={[styles.buttonCamera, { marginLeft: 8, marginBottom: 0, padding: 12 }]} onPress={() => toggleCamera('ingreso')}>
                   <Text style={styles.buttonText}>📷 Capturar</Text>
                 </TouchableOpacity>
@@ -1369,41 +1280,15 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
               )}
 
               <TouchableOpacity style={[styles.buttonPrimary, { marginTop: 15 }]} onPress={handleSaveProduct} disabled={loading}>
-                <Text style={styles.buttonText}>
-                  {editingProductId ? '💾 Guardar Cambios' : '+ Guardar / Ingresar Producto'}
-                </Text>
+                <Text style={styles.buttonText}>{editingProductId ? '💾 Guardar Cambios' : '+ Guardar Ingreso / Lote'}</Text>
               </TouchableOpacity>
 
               {editingProductId && (
                 <TouchableOpacity style={[styles.buttonDanger, { marginTop: 8, backgroundColor: '#6c757d' }]} onPress={handleCancelEditProduct}>
-                  <Text style={styles.buttonText}>Cancelar Edición</Text>
+                  <Text style={styles.buttonText}>Cancelar</Text>
                 </TouchableOpacity>
               )}
             </View>
-
-            <Text style={styles.subSectionTitle}>Catálogo General Registrado</Text>
-            {products.length === 0 ? <Text style={styles.emptyText}>No hay productos cargados en el sistema.</Text> : (
-              products.map(p => (
-                <View key={p.id} style={styles.productCard}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontWeight: 'bold', fontSize: 15 }}>{p.name}</Text>
-                    <Text style={{ color: '#28a745', fontWeight: '600' }}>PVP: ${p.price_per_unit} / {p.unit_type}</Text>
-                    {(userRole === 'superadmin' || userRole === 'dueno') && (
-                      <Text style={{ color: '#dc3545', fontSize: 11 }}>Costo: ${p.cost_price || 0} | Proveedor: {p.supplier || 'N/A'}</Text>
-                    )}
-                    <Text style={{ color: '#666', fontSize: 12 }}>Stock Actual: {p.stock} {p.unit_type} | EAN: {p.barcode || 'Sin EAN'}</Text>
-                  </View>
-                  <View style={{ flexDirection: 'row' }}>
-                    <TouchableOpacity style={[styles.buttonPrimary, { padding: 8, marginRight: 6 }]} onPress={() => handleStartEditProduct(p)}>
-                      <Text style={styles.buttonText}>✏️ Editar</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.buttonDanger} onPress={() => handleDeleteProduct(p.id)}>
-                      <Text style={styles.buttonText}>Borrar</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))
-            )}
           </ScrollView>
         )}
 
@@ -1430,40 +1315,20 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
                 {u.role !== 'superadmin' && (
                   <View style={{ borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 8 }}>
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
-                      <TouchableOpacity 
-                        style={[styles.badgeBtn, u.can_preventa && styles.badgeBtnActive, { width: '48%', marginBottom: 6 }]} 
-                        onPress={() => handleTogglePermission(u, 'can_preventa')}
-                      >
-                        <Text style={{ color: u.can_preventa ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>
-                          🛒 Pre-venta {u.can_preventa ? '✓' : '✗'}
-                        </Text>
+                      <TouchableOpacity style={[styles.badgeBtn, u.can_preventa && styles.badgeBtnActive, { width: '48%', marginBottom: 6 }]} onPress={() => handleTogglePermission(u, 'can_preventa')}>
+                        <Text style={{ color: u.can_preventa ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>🛒 Pre-venta {u.can_preventa ? '✓' : '✗'}</Text>
                       </TouchableOpacity>
 
-                      <TouchableOpacity 
-                        style={[styles.badgeBtn, u.can_caja && styles.badgeBtnActive, { width: '48%', marginBottom: 6 }]} 
-                        onPress={() => handleTogglePermission(u, 'can_caja')}
-                      >
-                        <Text style={{ color: u.can_caja ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>
-                          💳 Caja {u.can_caja ? '✓' : '✗'}
-                        </Text>
+                      <TouchableOpacity style={[styles.badgeBtn, u.can_caja && styles.badgeBtnActive, { width: '48%', marginBottom: 6 }]} onPress={() => handleTogglePermission(u, 'can_caja')}>
+                        <Text style={{ color: u.can_caja ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>💳 Caja {u.can_caja ? '✓' : '✗'}</Text>
                       </TouchableOpacity>
 
-                      <TouchableOpacity 
-                        style={[styles.badgeBtn, u.can_stock && styles.badgeBtnActive, { width: '48%' }]} 
-                        onPress={() => handleTogglePermission(u, 'can_stock')}
-                      >
-                        <Text style={{ color: u.can_stock ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>
-                          📦 Inventario {u.can_stock ? '✓' : '✗'}
-                        </Text>
+                      <TouchableOpacity style={[styles.badgeBtn, u.can_stock && styles.badgeBtnActive, { width: '48%' }]} onPress={() => handleTogglePermission(u, 'can_stock')}>
+                        <Text style={{ color: u.can_stock ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>📦 Inventario {u.can_stock ? '✓' : '✗'}</Text>
                       </TouchableOpacity>
 
-                      <TouchableOpacity 
-                        style={[styles.badgeBtn, u.can_ingreso && styles.badgeBtnActive, { width: '48%' }]} 
-                        onPress={() => handleTogglePermission(u, 'can_ingreso')}
-                      >
-                        <Text style={{ color: u.can_ingreso ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>
-                          📥 Ingresos {u.can_ingreso ? '✓' : '✗'}
-                        </Text>
+                      <TouchableOpacity style={[styles.badgeBtn, u.can_ingreso && styles.badgeBtnActive, { width: '48%' }]} onPress={() => handleTogglePermission(u, 'can_ingreso')}>
+                        <Text style={{ color: u.can_ingreso ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>📥 Ingresos {u.can_ingreso ? '✓' : '✗'}</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -1485,6 +1350,14 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
         {(canCaja || userRole === 'superadmin') && (
           <TouchableOpacity style={[styles.navBtn, currentTab === 'caja' && styles.navActive]} onPress={() => handleTabChange('caja')}>
             <Text style={styles.navText}>💳 Caja</Text>
+          </TouchableOpacity>
+        )}
+
+        {(userRole === 'superadmin' || userRole === 'dueno') && (
+          <TouchableOpacity style={[styles.navBtn, currentTab === 'alertas' && styles.navActive]} onPress={() => handleTabChange('alertas')}>
+            <Text style={[styles.navText, systemAlerts.length > 0 && { color: '#dc3545', fontWeight: 'bold' }]}>
+              🚨 Alertas {systemAlerts.length > 0 ? `(${systemAlerts.length})` : ''}
+            </Text>
           </TouchableOpacity>
         )}
 
