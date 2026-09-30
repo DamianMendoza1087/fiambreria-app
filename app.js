@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate } from './api';
+import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, fetchEmployeePerformance, compareEmployeesMetrics, fetchMRPStats } from './api';
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -27,7 +27,7 @@ export default function App() {
   const [searchQueryCashier, setSearchQueryCashier] = useState('');
   const [searchQueryStock, setSearchQueryStock] = useState('');
 
-  // Auditoría a Ciegas de Stock
+  // Auditoría
   const [selectedAuditProd, setSelectedAuditProd] = useState(null);
   const [countedQtyInput, setCountedQtyInput] = useState('');
 
@@ -48,43 +48,53 @@ export default function App() {
   const [cameraTarget, setCameraTarget] = useState(null);
   const [scanned, setScanned] = useState(false);
 
-  // Carritos & Pre-ventas
+  // Carritos
   const [vendorCart, setVendorCart] = useState([]);
   const [pendingPreSales, setPendingPreSales] = useState([]);
   const [selectedPreSaleId, setSelectedPreSaleId] = useState(null);
   const [cashierCart, setCashierCart] = useState([]);
   const [paymentMethod, setPaymentMethod] = useState('Efectivo');
-  
-  // Pago Mixto y Vuelto
   const [amountMP, setAmountMP] = useState('');
   const [cashTendered, setCashTendered] = useState('');
 
-  // ESTADO DE CAJA Y ARQUEO
+  // CAJA Y ARQUEO
   const [cashStatus, setCashStatus] = useState({ is_open: false });
   const [initialCashInput, setInitialCashInput] = useState('');
   const [closeCashInput, setCloseCashInput] = useState('');
   const [closeAttempt, setCloseAttempt] = useState(1);
   const [showCloseModal, setShowCloseModal] = useState(false);
 
-  // VERIFICACIÓN DE CAJA (SUPERADMIN / DUEÑO)
+  // VERIFICACIÓN DE CAJA
   const [selectedAuditDate, setSelectedAuditDate] = useState(new Date().toISOString().split('T')[0]);
   const [cashAuditsList, setCashAuditsList] = useState([]);
 
-  // Usuarios
+  // RRHH & COMPARATIVA DE EMPLEADOS
   const [usersList, setUsersList] = useState([]);
+  const [workLogs, setWorkLogs] = useState([]);
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPass, setNewUserPass] = useState('');
+  
+  const [empCompare1, setEmpCompare1] = useState('');
+  const [empCompare2, setEmpCompare2] = useState('');
+  const [comparisonResult, setComparisonResult] = useState(null);
+
+  // MRP COMPRAS INTELIGENTES
+  const [mrpSuggestions, setMrpSuggestions] = useState([]);
+  const [mrpDays, setMrpDays] = useState('7');
+  const [mrpTargetDays, setMrpTargetDays] = useState('3');
 
   const loadInitialData = async () => {
     try {
       setProducts(await fetchProducts());
       const users = await fetchUsers();
       setUsersList(users);
+      if (users.length > 1) {
+        setEmpCompare1(users[0].email);
+        setEmpCompare2(users[1].email);
+      }
       setPendingPreSales(await fetchPendingPreSales());
-      
-      const cStatus = await fetchCashSessionStatus();
-      setCashStatus(cStatus);
+      setCashStatus(await fetchCashSessionStatus());
 
       const currentUser = users.find(u => u.email === email);
       if (currentUser) {
@@ -110,19 +120,57 @@ export default function App() {
 
   const handleTabChange = async (tabName) => {
     setCurrentTab(tabName);
-    if (tabName === 'verificacion') {
-      loadCashAudits();
-    }
+    if (tabName === 'verificacion') loadCashAudits();
+    else if (tabName === 'rrhh') loadHRData();
+    else if (tabName === 'mrp') loadMRPData();
     await loadInitialData();
   };
 
   const loadCashAudits = async () => {
     try {
       setLoading(true);
-      const data = await fetchCashAuditsByDate(selectedAuditDate);
-      setCashAuditsList(data);
+      setCashAuditsList(await fetchCashAuditsByDate(selectedAuditDate));
     } catch (e) {
       alert('Error cargando auditorías de caja');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadHRData = async () => {
+    try {
+      setLoading(true);
+      setWorkLogs(await fetchWorkLogs());
+      setUsersList(await fetchUsers());
+    } catch (e) {
+      alert('Error al obtener datos de RRHH');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCompareEmployees = async () => {
+    if (!empCompare1 || !empCompare2) return alert('Seleccioná dos empleados para comparar');
+    if (empCompare1 === empCompare2) return alert('Seleccioná dos empleados distintos');
+    try {
+      setLoading(true);
+      const res = await compareEmployeesMetrics(empCompare1, empCompare2, 30);
+      setComparisonResult(res);
+    } catch (e) {
+      alert('Error en la comparativa de empleados');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadMRPData = async () => {
+    try {
+      setLoading(true);
+      const d = parseInt(mrpDays) || 7;
+      const t = parseInt(mrpTargetDays) || 3;
+      setMrpSuggestions(await fetchMRPStats(d, t));
+    } catch (e) {
+      alert('Error cargando sugerencias de MRP');
     } finally {
       setLoading(false);
     }
@@ -155,7 +203,6 @@ export default function App() {
     setIsAccountActive(false); setCanPreventa(false); setCanCaja(false); setCanStock(false); setCanIngreso(false);
   };
 
-  // APERTURA Y CIERRE DE CAJA
   const handleOpenCash = async () => {
     if (!initialCashInput) return alert('Ingresá el monto inicial de caja');
     try {
@@ -330,7 +377,7 @@ export default function App() {
     try {
       setLoading(true);
       const items = vendorCart.map(i => ({ product_id: i.id, quantity: parseFloat(i.qty) || 0 }));
-      const res = await createPreSale(items);
+      const res = await createPreSale({ items, created_by: email });
       alert(`✅ Pre-venta #${res.presale_id} generada correctamente`);
       setVendorCart([]);
       await loadInitialData();
@@ -448,7 +495,7 @@ export default function App() {
   };
 
   const handleFinalizeSale = async () => {
-    if (!cashStatus.is_open) return alert('⚠️ Debes abrir la caja antes de procesar ventas.');
+    if (!cashStatus.is_open) return alert('⚠️️ Debes abrir la caja antes de procesar ventas.');
     if (cashierCart.length === 0) return alert('No hay productos en el ticket de caja');
     const total = parseFloat(getCashierTotal());
     let cash = 0, mp = 0;
@@ -481,7 +528,8 @@ export default function App() {
         total_amount: total,
         amount_cash: cash,
         amount_mp: mp,
-        payment_method: paymentMethod
+        payment_method: paymentMethod,
+        sold_by: email
       });
       alert(`💳 Venta cobrada con éxito!\nVuelto a entregar en efectivo: $${getChangeDue()}`);
       setSelectedPreSaleId(null);
@@ -564,7 +612,7 @@ export default function App() {
       await createUser({ name: newUserName, email: newUserEmail, password: newUserPass });
       setNewUserName(''); setNewUserEmail(''); setNewUserPass('');
       await loadInitialData();
-      alert('Empleado registrado. Habilitale los módulos correspondientes.');
+      alert('Empleado registrado. Habilitale la jornada en RRHH.');
     } catch (e) {
       alert('Error al registrar usuario');
     } finally {
@@ -584,6 +632,7 @@ export default function App() {
       };
       await updateUserPermissions(user.id, updated);
       await loadInitialData();
+      if (permKey === 'is_active') loadHRData();
     } catch (e) {
       alert('Error al actualizar permisos del usuario');
     } finally {
@@ -595,7 +644,7 @@ export default function App() {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.loginCard}>
-          <Text style={styles.appTitle}>🍖 Fiambrería POS</Text>
+          <Text style={styles.appTitle}>🍖 Fiambrería POS & MRP</Text>
           <TextInput style={styles.input} placeholder="Correo Electrónico" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
           <TextInput style={styles.input} placeholder="Contraseña" secureTextEntry value={password} onChangeText={setPassword} />
           <TouchableOpacity style={styles.buttonPrimary} onPress={handleLogin} disabled={loading}>
@@ -610,9 +659,9 @@ export default function App() {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.loginCard}>
-          <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#dc3545', textAlign: 'center', marginBottom: 10 }}>🔒 Cuenta Inactiva</Text>
+          <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#dc3545', textAlign: 'center', marginBottom: 10 }}>🔒 Jornada No Habilitada</Text>
           <Text style={{ textAlign: 'center', color: '#555', marginBottom: 20 }}>
-            Tu usuario aún no ha sido habilitado por el Administrador.
+            Tu usuario aún no ha sido habilitado para iniciar el turno por el Dueño/Admin.
           </Text>
           <TouchableOpacity style={styles.buttonDanger} onPress={handleLogout}>
             <Text style={styles.buttonText}>Cerrar Sesión</Text>
@@ -629,7 +678,7 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
         <View>
-          <Text style={styles.headerTitle}>🍖 Fiambrería POS</Text>
+          <Text style={styles.headerTitle}>🍖 Fiambrería POS & MRP</Text>
           <Text style={{ color: '#ccc', fontSize: 11 }}>Usuario: {email} ({userRole})</Text>
         </View>
         <TouchableOpacity onPress={handleLogout}><Text style={{ color: '#dc3545', fontWeight: 'bold' }}>🚪 Salir</Text></TouchableOpacity>
@@ -715,7 +764,6 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>💳 Caja y Cobro</Text>
 
-            {/* SI LA CAJA ESTÁ CERRADA: SOLICITAR MONTO INICIAL */}
             {!cashStatus.is_open ? (
               <View style={styles.card}>
                 <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#dc3545', textAlign: 'center', marginBottom: 10 }}>🔴 Caja Cerrada</Text>
@@ -736,7 +784,6 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
                 </TouchableOpacity>
               </View>
             ) : (
-              /* SI LA CAJA ESTÁ ABIERTA: OPERACIÓN NORMAL */
               <>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#d4edda', padding: 12, borderRadius: 8, marginBottom: 15 }}>
                   <View>
@@ -748,7 +795,6 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
                   </TouchableOpacity>
                 </View>
 
-                {/* MODAL / PANEL DE CIERRE DE CAJA A CIEGAS */}
                 {showCloseModal && (
                   <View style={{ backgroundColor: '#fff3cd', padding: 15, borderRadius: 10, borderWidth: 1, borderColor: '#ffeeba', marginBottom: 15 }}>
                     <Text style={{ fontWeight: 'bold', fontSize: 16, color: '#856404', marginBottom: 6 }}>
@@ -924,7 +970,197 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
           </ScrollView>
         )}
 
-        {/* VERIFICACIÓN DE CAJA (DUEÑO / SUPERADMIN) */}
+        {/* MÓDULO RRHH - HABILIACIÓN, FICHAJE Y COMPARATIVA */}
+        {currentTab === 'rrhh' && (userRole === 'superadmin' || userRole === 'dueno') && (
+          <ScrollView contentContainerStyle={styles.scrollPadding}>
+            <Text style={styles.sectionTitle}>👨‍💼 RRHH, Fichaje y Rendimiento</Text>
+
+            <Text style={styles.subSectionTitle}>Habilitación Diaria y Fichaje de Turno</Text>
+            {usersList.filter(u => u.role !== 'superadmin').map(u => (
+              <View key={u.id} style={styles.card}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <View>
+                    <Text style={{ fontWeight: 'bold', fontSize: 16 }}>{u.name}</Text>
+                    <Text style={{ color: '#666', fontSize: 12 }}>{u.email}</Text>
+                  </View>
+
+                  <TouchableOpacity 
+                    style={[styles.typeBtn, { paddingHorizontal: 12, paddingVertical: 8, backgroundColor: u.is_active ? '#28a745' : '#dc3545' }]} 
+                    onPress={() => handleTogglePermission(u, 'is_active')}
+                  >
+                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>
+                      {u.is_active ? '🟢 EN JORNADA' : '🔴 FUERA DE TURNO'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+
+            {/* SECCIÓN COMPARATIVA DE EMPLEADOS */}
+            <View style={[styles.card, { marginTop: 10 }]}>
+              <Text style={styles.subSectionTitle}>⚖️ Comparativa de Desempeño (Últimos 30 días)</Text>
+              
+              <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#555' }}>Empleado 1:</Text>
+              <View style={{ borderBottomWidth: 1, borderBottomColor: '#ccc', marginBottom: 10 }}>
+                {usersList.map(u => (
+                  <TouchableOpacity 
+                    key={`emp1-${u.id}`} 
+                    style={{ padding: 6, backgroundColor: empCompare1 === u.email ? '#e8f4f8' : '#fff' }}
+                    onPress={() => setEmpCompare1(u.email)}
+                  >
+                    <Text style={{ fontWeight: empCompare1 === u.email ? 'bold' : 'normal', color: empCompare1 === u.email ? '#007bff' : '#333' }}>
+                      {u.name} ({u.email})
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#555' }}>Empleado 2:</Text>
+              <View style={{ borderBottomWidth: 1, borderBottomColor: '#ccc', marginBottom: 10 }}>
+                {usersList.map(u => (
+                  <TouchableOpacity 
+                    key={`emp2-${u.id}`} 
+                    style={{ padding: 6, backgroundColor: empCompare2 === u.email ? '#e8f4f8' : '#fff' }}
+                    onPress={() => setEmpCompare2(u.email)}
+                  >
+                    <Text style={{ fontWeight: empCompare2 === u.email ? 'bold' : 'normal', color: empCompare2 === u.email ? '#007bff' : '#333' }}>
+                      {u.name} ({u.email})
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <TouchableOpacity style={styles.buttonPrimary} onPress={handleCompareEmployees} disabled={loading}>
+                <Text style={styles.buttonText}>🔍 Comparar Rendimiento</Text>
+              </TouchableOpacity>
+
+              {comparisonResult && (
+                <View style={{ marginTop: 15, backgroundColor: '#f8f9fa', padding: 12, borderRadius: 8 }}>
+                  <Text style={{ fontWeight: 'bold', fontSize: 15, color: '#007bff', textAlign: 'center', marginBottom: 10 }}>
+                    📊 Resultados Comparativos
+                  </Text>
+
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
+                    {/* COLUMNA EMPLEADO 1 */}
+                    <View style={{ flex: 0.48, backgroundColor: '#fff', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: '#ddd' }}>
+                      <Text style={{ fontWeight: 'bold', color: '#007bff' }}>{comparisonResult.emp1.name}</Text>
+                      <Text style={{ fontSize: 11, marginTop: 4 }}>Ventas: <Text style={{ fontWeight: 'bold' }}>{comparisonResult.emp1.sales_count}</Text></Text>
+                      <Text style={{ fontSize: 11 }}>Total: <Text style={{ fontWeight: 'bold', color: '#28a745' }}>${comparisonResult.emp1.total_revenue}</Text></Text>
+                      <Text style={{ fontSize: 11 }}>Ticket Prom: <Text style={{ fontWeight: 'bold' }}>${comparisonResult.emp1.ticket_avg}</Text></Text>
+                      <Text style={{ fontSize: 11 }}>Horas: <Text style={{ fontWeight: 'bold' }}>{comparisonResult.emp1.total_hours} hs</Text></Text>
+                      <Text style={{ fontSize: 11 }}>Dif. Caja: <Text style={{ fontWeight: 'bold', color: '#dc3545' }}>${comparisonResult.emp1.total_cash_diff}</Text></Text>
+                    </View>
+
+                    {/* COLUMNA EMPLEADO 2 */}
+                    <View style={{ flex: 0.48, backgroundColor: '#fff', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: '#ddd' }}>
+                      <Text style={{ fontWeight: 'bold', color: '#6f42c1' }}>{comparisonResult.emp2.name}</Text>
+                      <Text style={{ fontSize: 11, marginTop: 4 }}>Ventas: <Text style={{ fontWeight: 'bold' }}>{comparisonResult.emp2.sales_count}</Text></Text>
+                      <Text style={{ fontSize: 11 }}>Total: <Text style={{ fontWeight: 'bold', color: '#28a745' }}>${comparisonResult.emp2.total_revenue}</Text></Text>
+                      <Text style={{ fontSize: 11 }}>Ticket Prom: <Text style={{ fontWeight: 'bold' }}>${comparisonResult.emp2.ticket_avg}</Text></Text>
+                      <Text style={{ fontSize: 11 }}>Horas: <Text style={{ fontWeight: 'bold' }}>{comparisonResult.emp2.total_hours} hs</Text></Text>
+                      <Text style={{ fontSize: 11 }}>Dif. Caja: <Text style={{ fontWeight: 'bold', color: '#dc3545' }}>${comparisonResult.emp2.total_cash_diff}</Text></Text>
+                    </View>
+                  </View>
+
+                  <View style={{ backgroundColor: '#e2e3e5', padding: 10, borderRadius: 6, marginTop: 6 }}>
+                    <Text style={{ fontWeight: 'bold', fontSize: 12, color: '#383d41', marginBottom: 4 }}>💡 Diagnóstico Automático:</Text>
+                    {comparisonResult.diagnosis.map((line, idx) => (
+                      <Text key={idx} style={{ fontSize: 11, color: '#383d41', marginBottom: 2 }}>{line}</Text>
+                    ))}
+                  </View>
+                </View>
+              )}
+            </View>
+
+            <Text style={styles.subSectionTitle}>📋 Registro de Horas Trabajadas (Fichero)</Text>
+            {workLogs.length === 0 ? <Text style={styles.emptyText}>No hay fichajes registrados todavía.</Text> : (
+              workLogs.map(log => (
+                <View key={log.id} style={styles.card}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <Text style={{ fontWeight: 'bold', color: '#007bff' }}>{log.user_name}</Text>
+                    <Text style={{ fontWeight: 'bold' }}>📅 {log.date}</Text>
+                  </View>
+                  <Text style={{ fontSize: 12, color: '#555', marginTop: 4 }}>
+                    Entrada: <Text style={{ fontWeight: 'bold' }}>{log.clock_in}</Text> | Salida: <Text style={{ fontWeight: 'bold' }}>{log.clock_out}</Text>
+                  </Text>
+                  <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#28a745', marginTop: 4 }}>
+                    ⏱️ Horas acumuladas: {log.hours_worked} hs
+                  </Text>
+                </View>
+              ))
+            )}
+          </ScrollView>
+        )}
+
+        {/* MÓDULO MRP - COMPRAS INTELIGENTES */}
+        {currentTab === 'mrp' && (userRole === 'superadmin' || userRole === 'dueno') && (
+          <ScrollView contentContainerStyle={styles.scrollPadding}>
+            <Text style={styles.sectionTitle}>📦 MRP: Compras Inteligentes</Text>
+            
+            <View style={styles.card}>
+              <Text style={{ fontSize: 12, color: '#555', marginBottom: 10 }}>
+                Analiza las ventas históricas para determinar la demanda diaria y sugerir la compra exacta de productos, evitando stock inmovilizado o faltantes.
+              </Text>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
+                <View style={{ flex: 0.48 }}>
+                  <Text style={{ fontSize: 11, fontWeight: 'bold' }}>Días Análisis de Ventas:</Text>
+                  <TextInput style={styles.input} keyboardType="numeric" value={mrpDays} onChangeText={setMrpDays} />
+                </View>
+
+                <View style={{ flex: 0.48 }}>
+                  <Text style={{ fontSize: 11, fontWeight: 'bold' }}>Días Stock Objetivos:</Text>
+                  <TextInput style={styles.input} keyboardType="numeric" value={mrpTargetDays} onChangeText={setMrpTargetDays} />
+                </View>
+              </View>
+
+              <TouchableOpacity style={styles.buttonPrimary} onPress={loadMRPData} disabled={loading}>
+                <Text style={styles.buttonText}>📊 Recalcular Sugerencias MRP</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.subSectionTitle}>🛒 Reposición Recomendada de Productos</Text>
+            {mrpSuggestions.length === 0 ? (
+              <Text style={styles.emptyText}>No hay recomendaciones de compra. O bien no hubo ventas recientes o el stock cubre la demanda.</Text>
+            ) : (
+              mrpSuggestions.map((item, idx) => {
+                let badgeColor = '#28a745';
+                if (item.status === 'AGOTADO') badgeColor = '#dc3545';
+                if (item.status === 'CRÍTICO') badgeColor = '#fd7e14';
+
+                return (
+                  <View key={idx} style={styles.card}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Text style={{ fontWeight: 'bold', fontSize: 16 }}>{item.product_name}</Text>
+                      <View style={{ backgroundColor: badgeColor, padding: 4, borderRadius: 4 }}>
+                        <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>{item.status}</Text>
+                      </View>
+                    </View>
+
+                    <Text style={{ fontSize: 12, color: '#666' }}>Proveedor: {item.supplier}</Text>
+
+                    <View style={{ backgroundColor: '#f8f9fa', padding: 10, borderRadius: 8, marginTop: 8 }}>
+                      <Text style={{ fontSize: 12 }}>Stock Actual: <Text style={{ fontWeight: 'bold' }}>{item.current_stock} {item.unit_type}</Text></Text>
+                      <Text style={{ fontSize: 12 }}>Ventas en {mrpDays} días: <Text style={{ fontWeight: 'bold' }}>{item.total_sold_period} {item.unit_type}</Text></Text>
+                      <Text style={{ fontSize: 12 }}>Demanda Media Diaria: <Text style={{ fontWeight: 'bold' }}>{item.daily_demand} {item.unit_type}/día</Text></Text>
+                      
+                      <View style={{ borderTopWidth: 1, borderTopColor: '#ddd', marginTop: 6, paddingTop: 6 }}>
+                        <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#007bff' }}>
+                          💡 Sugerencia de Compra: {item.suggested_buy} {item.unit_type}
+                        </Text>
+                        <Text style={{ fontSize: 12, color: '#dc3545', fontWeight: 'bold' }}>
+                          Inversión Estimada: ${item.estimated_cost}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </ScrollView>
+        )}
+
+        {/* VERIFICACIÓN DE CAJA */}
         {currentTab === 'verificacion' && (userRole === 'superadmin' || userRole === 'dueno') && (
           <ScrollView contentContainerStyle={styles.scrollPadding}>
             <Text style={styles.sectionTitle}>🔍 Verificación de Caja y Auditoría</Text>
@@ -985,9 +1221,6 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
 
             <View style={styles.card}>
               <Text style={styles.subSectionTitle}>👁️ Conteo Físico a Ciegas (Operario)</Text>
-              <Text style={{ fontSize: 12, color: '#666', marginBottom: 10 }}>
-                Escanear EAN o buscar el material para ingresar el conteo real contado en el depósito/local.
-              </Text>
 
               <TouchableOpacity style={styles.buttonCamera} onPress={() => toggleCamera('stock')}>
                 <Text style={styles.buttonText}>{showCamera && cameraTarget === 'stock' ? '📷 Cerrar Escáner' : '📷 Escanear EAN del Producto'}</Text>
@@ -1177,7 +1410,7 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
         {/* PERMISOS */}
         {currentTab === 'usuarios' && (userRole === 'superadmin' || userRole === 'dueno') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
-            <Text style={styles.sectionTitle}>👥 Personal y Permisos</Text>
+            <Text style={styles.sectionTitle}>👥 Permisos por Módulo</Text>
             <View style={styles.card}>
               <Text style={styles.subSectionTitle}>Registrar Nuevo Empleado</Text>
               <TextInput style={styles.input} placeholder="Nombre Completo" value={newUserName} onChangeText={setNewUserName} />
@@ -1188,33 +1421,14 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.subSectionTitle}>Configuración Granular de Módulos</Text>
+            <Text style={styles.subSectionTitle}>Acceso a Funciones del Sistema</Text>
             {usersList.map(u => (
               <View key={u.id} style={[styles.card, { marginBottom: 12 }]}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <View>
-                    <Text style={{ fontWeight: 'bold', fontSize: 16 }}>{u.name}</Text>
-                    <Text style={{ color: '#666', fontSize: 12 }}>{u.email}</Text>
-                  </View>
-                  
-                  {u.role !== 'superadmin' && (
-                    <TouchableOpacity 
-                      style={[styles.typeBtn, { padding: 6, backgroundColor: u.is_active ? '#28a745' : '#dc3545' }]} 
-                      onPress={() => handleTogglePermission(u, 'is_active')}
-                    >
-                      <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>
-                        {u.is_active ? '🟢 HABILITADO' : '🔴 INACTIVO'}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
+                <Text style={{ fontWeight: 'bold', fontSize: 16 }}>{u.name}</Text>
+                <Text style={{ color: '#666', fontSize: 12, marginBottom: 8 }}>{u.email}</Text>
 
                 {u.role !== 'superadmin' && (
-                  <View style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 8 }}>
-                    <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 6 }}>
-                      Habilitar Acceso a Módulos:
-                    </Text>
-                    
+                  <View style={{ borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 8 }}>
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
                       <TouchableOpacity 
                         style={[styles.badgeBtn, u.can_preventa && styles.badgeBtnActive, { width: '48%', marginBottom: 6 }]} 
@@ -1271,6 +1485,18 @@ const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : products.f
         {(canCaja || userRole === 'superadmin') && (
           <TouchableOpacity style={[styles.navBtn, currentTab === 'caja' && styles.navActive]} onPress={() => handleTabChange('caja')}>
             <Text style={styles.navText}>💳 Caja</Text>
+          </TouchableOpacity>
+        )}
+
+        {(userRole === 'superadmin' || userRole === 'dueno') && (
+          <TouchableOpacity style={[styles.navBtn, currentTab === 'rrhh' && styles.navActive]} onPress={() => handleTabChange('rrhh')}>
+            <Text style={styles.navText}>👨‍💼 RRHH</Text>
+          </TouchableOpacity>
+        )}
+
+        {(userRole === 'superadmin' || userRole === 'dueno') && (
+          <TouchableOpacity style={[styles.navBtn, currentTab === 'mrp' && styles.navActive]} onPress={() => handleTabChange('mrp')}>
+            <Text style={styles.navText}>📊 MRP</Text>
           </TouchableOpacity>
         )}
 
@@ -1348,7 +1574,7 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: Platform.OS === 'android' ? 28 : 12
   },
-  navBtn: { flex: 1, padding: 6, alignItems: 'center' },
+  navBtn: { flex: 1, padding: 4, alignItems: 'center' },
   navActive: { borderTopWidth: 3, borderTopColor: '#007bff' },
-  navText: { color: '#444', fontWeight: 'bold', fontSize: 9 }
+  navText: { color: '#444', fontWeight: 'bold', fontSize: 8 }
 });
