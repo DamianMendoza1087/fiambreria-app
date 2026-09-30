@@ -113,7 +113,7 @@ export const finalizeSale = async (saleData) => {
   return await res.json();
 };
 
-// CAJA Y ARQUEO
+// CAJA Y ARQUEOS
 export const fetchCashSessionStatus = async () => {
   const res = await fetch(`${API_URL}/cash/status`);
   if (!res.ok) throw new Error("Error al consultar estado de caja");
@@ -143,5 +143,31 @@ export const closeCashSession = async (reportedCash, closedBy, attemptNumber) =>
 export const fetchCashAuditsByDate = async (dateStr) => {
   const res = await fetch(`${API_URL}/cash/audits?date=${dateStr}`);
   if (!res.ok) throw new Error("Error al consultar arqueos de caja");
+  return await res.json();
+};
+
+// RRHH & METRICAS DE DESEMPEÑO
+export const fetchWorkLogs = async () => {
+  const res = await fetch(`${API_URL}/hr/worklogs`);
+  if (!res.ok) throw new Error("Error al obtener fichajes de empleados");
+  return await res.json();
+};
+
+export const fetchEmployeePerformance = async (userEmail, days = 30) => {
+  const res = await fetch(`${API_URL}/hr/performance?email=${userEmail}&days=${days}`);
+  if (!res.ok) throw new Error("Error al consultar desempeño del empleado");
+  return await res.json();
+};
+
+export const compareEmployeesMetrics = async (email1, email2, days = 30) => {
+  const res = await fetch(`${API_URL}/hr/compare?email1=${email1}&email2=${email2}&days=${days}`);
+  if (!res.ok) throw new Error("Error al procesar comparativa de empleados");
+  return await res.json();
+};
+
+// MRP / COMPRAS INTELIGENTES
+export const fetchMRPStats = async (days = 7, targetDays = 3) => {
+  const res = await fetch(`${API_URL}/mrp/suggestions?days=${days}&target_days=${targetDays}`);
+  if (!res.ok) throw new Error("Error al calcular sugerencias de compras MRP");
   return await res.json();
 };
