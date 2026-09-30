@@ -171,3 +171,16 @@ export const fetchMRPStats = async (days = 7, targetDays = 3) => {
   if (!res.ok) throw new Error("Error al calcular sugerencias de compras MRP");
   return await res.json();
 };
+
+// ALERTAS Y CONTROL DE VENCIMIENTOS (FEFO)
+export const fetchSystemAlerts = async () => {
+  const res = await fetch(`${API_URL}/alerts`);
+  if (!res.ok) throw new Error("Error al consultar alertas del sistema");
+  return await res.json();
+};
+
+export const fetchProductLots = async (productId) => {
+  const res = await fetch(`${API_URL}/products/${productId}/lots`);
+  if (!res.ok) throw new Error("Error al consultar lotes del producto");
+  return await res.json();
+};
