@@ -42,8 +42,7 @@ export default function App() {
   const [prodStock, setProdStock] = useState('');
   const [prodUnitType, setProdUnitType] = useState('unid');
   const [prodBarcode, setProdBarcode] = useState('');
-  const [prodExpirationDate, setProdExpirationDate] = useState('');
-  const [prodMinMargin, setProdMinMargin] = useState('30');
+  const [prodExpirationDate, setProdExpirationDate] = useState(''); // DD-MM-AAAA
   const [prodIsActive, setProdIsActive] = useState(true);
 
   // Cámara / Escáner
@@ -482,7 +481,7 @@ export default function App() {
       mp = parseFloat(amountMP) || 0;
       if (mp > total) return alert(`⚠️ Monto MP supera el total`);
       cash = total - mp;
-      if (cash > 0 && (parseFloat(cashTendered) || 0) < cash) return alert(`⚠️️ Dinero ingresado menor que el saldo efectivo`);
+      if (cash > 0 && (parseFloat(cashTendered) || 0) < cash) return alert(`⚠ Dinero ingresado menor que el saldo efectivo`);
     }
 
     try {
@@ -516,14 +515,13 @@ export default function App() {
     setProdStock(String(prod.stock));
     setProdUnitType(prod.unit_type || 'unid');
     setProdBarcode(prod.barcode || '');
-    setProdMinMargin(prod.min_margin_percent ? String(prod.min_margin_percent) : '30');
     setProdIsActive(prod.is_active);
     setProdExpirationDate('');
   };
 
   const handleCancelEditProduct = () => {
     setEditingProductId(null);
-    setProdName(''); setProdCost(''); setProdPrice(''); setProdSupplier(''); setProdStock(''); setProdBarcode(''); setProdExpirationDate(''); setProdMinMargin('30'); setProdUnitType('unid'); setProdIsActive(true);
+    setProdName(''); setProdCost(''); setProdPrice(''); setProdSupplier(''); setProdStock(''); setProdBarcode(''); setProdExpirationDate(''); setProdUnitType('unid'); setProdIsActive(true);
   };
 
   const handleSaveProduct = async () => {
@@ -540,8 +538,7 @@ export default function App() {
         stock: parseFloat(prodStock.replace(',', '.')),
         barcode: prodBarcode || null,
         is_active: prodIsActive,
-        expiration_date: prodExpirationDate || null,
-        min_margin_percent: parseFloat(prodMinMargin.replace(',', '.')) || 30.0
+        expiration_date: prodExpirationDate || null
       };
 
       if (editingProductId) {
@@ -969,7 +966,7 @@ const activeProducts = products.filter(p => p.is_active);
             ))}
 
             <View style={[styles.card, { marginTop: 10 }]}>
-              <Text style={styles.subSectionTitle}>⚖️️ Comparativa de Desempeño</Text>
+              <Text style={styles.subSectionTitle}>⚖ Comparativa de Desempeño</Text>
               
               <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#555' }}>Empleado 1:</Text>
               <View style={{ borderBottomWidth: 1, borderBottomColor: '#ccc', marginBottom: 10 }}>
@@ -1213,7 +1210,7 @@ const activeProducts = products.filter(p => p.is_active);
                     </View>
 
                     <TouchableOpacity style={[styles.buttonPrimary, { padding: 8 }]} onPress={() => { setCurrentTab('ingresos'); handleStartEditProduct(p); }}>
-                      <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>✏️ Editar / Desactivar</Text>
+                      <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>✏️️ Editar / Desactivar</Text>
                     </TouchableOpacity>
                   </View>
                 ))}
@@ -1227,7 +1224,7 @@ const activeProducts = products.filter(p => p.is_active);
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>📥 Ingresos y Control de Vencimiento (FEFO)</Text>
             <View style={styles.card}>
-              <Text style={styles.subSectionTitle}>{editingProductId ? '✏️️ Editar Producto o Desactivar' : '➕ Alta de Mercadería y Lote'}</Text>
+              <Text style={styles.subSectionTitle}>{editingProductId ? '✏ Editar Producto o Desactivar' : '➕ Alta de Mercadería y Lote'}</Text>
               
               <TextInput style={styles.input} placeholder="Nombre del Producto" value={prodName} onChangeText={setProdName} />
               <TextInput style={styles.input} placeholder="Categoría" value={prodCategory} onChangeText={setProdCategory} />
@@ -1239,10 +1236,10 @@ const activeProducts = products.filter(p => p.is_active);
                 </>
               )}
 
-              <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4 }}>📅 Fecha de Vencimiento del Lote (AAAA-MM-DD):</Text>
-              <TextInput style={styles.inputHighlight} placeholder="Ej: 2026-10-31" value={prodExpirationDate} onChangeText={setProdExpirationDate} />
+              <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4 }}>📅 Fecha de Vencimiento del Lote (DD-MM-AAAA):</Text>
+              <TextInput style={styles.inputHighlight} placeholder="Ej: 31-10-2026" value={prodExpirationDate} onChangeText={setProdExpirationDate} />
 
-              <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#555', marginBottom: 6 }}>Unidad de Medida:</Text>
+              <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#555', marginBottom: 6, marginTop: 10 }}>Unidad de Medida:</Text>
               <View style={{ flexDirection: 'row', marginBottom: 12 }}>
                 <TouchableOpacity style={[styles.typeBtn, prodUnitType === 'unid' && styles.typeBtnActive]} onPress={() => setProdUnitType('unid')}>
                   <Text style={{ color: prodUnitType === 'unid' ? '#fff' : '#333', fontWeight: 'bold' }}>Unidades (unid)</Text>
@@ -1255,7 +1252,6 @@ const activeProducts = products.filter(p => p.is_active);
 
               <TextInput style={styles.input} placeholder={`Precio PVP por ${prodUnitType} ($)`} keyboardType="numeric" value={prodPrice} onChangeText={setProdPrice} />
               <TextInput style={styles.input} placeholder={`Cantidad de Unidades Compradas (${prodUnitType})`} keyboardType="numeric" value={prodStock} onChangeText={setProdStock} />
-              <TextInput style={styles.input} placeholder="Margen Mínimo Deseado % (por defecto 30%)" keyboardType="numeric" value={prodMinMargin} onChangeText={setProdMinMargin} />
 
               {editingProductId && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
@@ -1339,63 +1335,74 @@ const activeProducts = products.filter(p => p.is_active);
         )}
       </View>
 
-      {/* NAVBAR */}
-      <View style={styles.navbar}>
-        {(canPreventa || userRole === 'superadmin') && (
-          <TouchableOpacity style={[styles.navBtn, currentTab === 'preventa' && styles.navActive]} onPress={() => handleTabChange('preventa')}>
-            <Text style={styles.navText}>🛒 Ventas</Text>
-          </TouchableOpacity>
-        )}
+      {/* NAVBAR NAVEGABLE Y CÓMODO CON SCROLL HORIZONTAL */}
+      <View style={styles.navbarWrapper}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.navbarContent}>
+          {(canPreventa || userRole === 'superadmin') && (
+            <TouchableOpacity style={[styles.navBtn, currentTab === 'preventa' && styles.navActive]} onPress={() => handleTabChange('preventa')}>
+              <Text style={styles.navIcon}>🛒</Text>
+              <Text style={styles.navText}>Ventas</Text>
+            </TouchableOpacity>
+          )}
 
-        {(canCaja || userRole === 'superadmin') && (
-          <TouchableOpacity style={[styles.navBtn, currentTab === 'caja' && styles.navActive]} onPress={() => handleTabChange('caja')}>
-            <Text style={styles.navText}>💳 Caja</Text>
-          </TouchableOpacity>
-        )}
+          {(canCaja || userRole === 'superadmin') && (
+            <TouchableOpacity style={[styles.navBtn, currentTab === 'caja' && styles.navActive]} onPress={() => handleTabChange('caja')}>
+              <Text style={styles.navIcon}>💳</Text>
+              <Text style={styles.navText}>Caja</Text>
+            </TouchableOpacity>
+          )}
 
-        {(userRole === 'superadmin' || userRole === 'dueno') && (
-          <TouchableOpacity style={[styles.navBtn, currentTab === 'alertas' && styles.navActive]} onPress={() => handleTabChange('alertas')}>
-            <Text style={[styles.navText, systemAlerts.length > 0 && { color: '#dc3545', fontWeight: 'bold' }]}>
-              🚨 Alertas {systemAlerts.length > 0 ? `(${systemAlerts.length})` : ''}
-            </Text>
-          </TouchableOpacity>
-        )}
+          {(userRole === 'superadmin' || userRole === 'dueno') && (
+            <TouchableOpacity style={[styles.navBtn, currentTab === 'alertas' && styles.navActive]} onPress={() => handleTabChange('alertas')}>
+              <Text style={styles.navIcon}>🚨</Text>
+              <Text style={[styles.navText, systemAlerts.length > 0 && { color: '#dc3545', fontWeight: 'bold' }]}>
+                Alertas {systemAlerts.length > 0 ? `(${systemAlerts.length})` : ''}
+              </Text>
+            </TouchableOpacity>
+          )}
 
-        {(userRole === 'superadmin' || userRole === 'dueno') && (
-          <TouchableOpacity style={[styles.navBtn, currentTab === 'rrhh' && styles.navActive]} onPress={() => handleTabChange('rrhh')}>
-            <Text style={styles.navText}>👨‍💼 RRHH</Text>
-          </TouchableOpacity>
-        )}
+          {(userRole === 'superadmin' || userRole === 'dueno') && (
+            <TouchableOpacity style={[styles.navBtn, currentTab === 'rrhh' && styles.navActive]} onPress={() => handleTabChange('rrhh')}>
+              <Text style={styles.navIcon}>👨‍💼</Text>
+              <Text style={styles.navText}>RRHH</Text>
+            </TouchableOpacity>
+          )}
 
-        {(userRole === 'superadmin' || userRole === 'dueno') && (
-          <TouchableOpacity style={[styles.navBtn, currentTab === 'mrp' && styles.navActive]} onPress={() => handleTabChange('mrp')}>
-            <Text style={styles.navText}>📊 MRP</Text>
-          </TouchableOpacity>
-        )}
+          {(userRole === 'superadmin' || userRole === 'dueno') && (
+            <TouchableOpacity style={[styles.navBtn, currentTab === 'mrp' && styles.navActive]} onPress={() => handleTabChange('mrp')}>
+              <Text style={styles.navIcon}>📊</Text>
+              <Text style={styles.navText}>MRP</Text>
+            </TouchableOpacity>
+          )}
 
-        {(userRole === 'superadmin' || userRole === 'dueno') && (
-          <TouchableOpacity style={[styles.navBtn, currentTab === 'verificacion' && styles.navActive]} onPress={() => handleTabChange('verificacion')}>
-            <Text style={styles.navText}>🔍 Arqueo</Text>
-          </TouchableOpacity>
-        )}
+          {(userRole === 'superadmin' || userRole === 'dueno') && (
+            <TouchableOpacity style={[styles.navBtn, currentTab === 'verificacion' && styles.navActive]} onPress={() => handleTabChange('verificacion')}>
+              <Text style={styles.navIcon}>🔍</Text>
+              <Text style={styles.navText}>Arqueo</Text>
+            </TouchableOpacity>
+          )}
 
-        {(canStock || userRole === 'superadmin') && (
-          <TouchableOpacity style={[styles.navBtn, currentTab === 'inventario' && styles.navActive]} onPress={() => handleTabChange('inventario')}>
-            <Text style={styles.navText}>📦 Stock</Text>
-          </TouchableOpacity>
-        )}
+          {(canStock || userRole === 'superadmin') && (
+            <TouchableOpacity style={[styles.navBtn, currentTab === 'inventario' && styles.navActive]} onPress={() => handleTabChange('inventario')}>
+              <Text style={styles.navIcon}>📦</Text>
+              <Text style={styles.navText}>Stock</Text>
+            </TouchableOpacity>
+          )}
 
-        {(canIngreso || userRole === 'superadmin' || userRole === 'dueno') && (
-          <TouchableOpacity style={[styles.navBtn, currentTab === 'ingresos' && styles.navActive]} onPress={() => handleTabChange('ingresos')}>
-            <Text style={styles.navText}>📥 Ingresos</Text>
-          </TouchableOpacity>
-        )}
+          {(canIngreso || userRole === 'superadmin' || userRole === 'dueno') && (
+            <TouchableOpacity style={[styles.navBtn, currentTab === 'ingresos' && styles.navActive]} onPress={() => handleTabChange('ingresos')}>
+              <Text style={styles.navIcon}>📥</Text>
+              <Text style={styles.navText}>Ingresos</Text>
+            </TouchableOpacity>
+          )}
 
-        {(userRole === 'superadmin' || userRole === 'dueno') && (
-          <TouchableOpacity style={[styles.navBtn, currentTab === 'usuarios' && styles.navActive]} onPress={() => handleTabChange('usuarios')}>
-            <Text style={styles.navText}>👥 Permisos</Text>
-          </TouchableOpacity>
-        )}
+          {(userRole === 'superadmin' || userRole === 'dueno') && (
+            <TouchableOpacity style={[styles.navBtn, currentTab === 'usuarios' && styles.navActive]} onPress={() => handleTabChange('usuarios')}>
+              <Text style={styles.navIcon}>👥</Text>
+              <Text style={styles.navText}>Permisos</Text>
+            </TouchableOpacity>
+          )}
+        </ScrollView>
       </View>
     </SafeAreaView>
   );
@@ -1439,15 +1446,31 @@ const styles = StyleSheet.create({
   emptyText: { color: '#888', fontStyle: 'italic' },
   loginCard: { backgroundColor: '#fff', margin: 20, padding: 20, borderRadius: 10 },
   appTitle: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 15 },
-  navbar: { 
-    flexDirection: 'row', 
+  navbarWrapper: { 
     backgroundColor: '#fff', 
     borderTopWidth: 1, 
-    borderTopColor: '#ddd', 
-    paddingTop: 8,
-    paddingBottom: Platform.OS === 'android' ? 28 : 12
+    borderTopColor: '#ddd',
+    paddingVertical: 6,
+    paddingBottom: Platform.OS === 'android' ? 32 : 12
   },
-  navBtn: { flex: 1, padding: 4, alignItems: 'center' },
-  navActive: { borderTopWidth: 3, borderTopColor: '#007bff' },
-  navText: { color: '#444', fontWeight: 'bold', fontSize: 8 }
+  navbarContent: {
+    paddingHorizontal: 10,
+    alignItems: 'center'
+  },
+  navBtn: { 
+    paddingHorizontal: 14, 
+    paddingVertical: 6, 
+    marginHorizontal: 4,
+    borderRadius: 8,
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#eee'
+  },
+  navActive: { 
+    backgroundColor: '#007bff',
+    borderColor: '#0056b3'
+  },
+  navIcon: { fontSize: 16, marginBottom: 2 },
+  navText: { color: '#333', fontWeight: 'bold', fontSize: 11 }
 });
