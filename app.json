@@ -1,5 +1,13 @@
 {
   "expo": {
+    "name": "Fiambreria App",
+    "slug": "fiambreria-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
     "extra": {
       "eas": {
         "projectId": "e807cbda-fc04-4355-ae73-712700a39e5f"
