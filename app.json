@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "e807cbda-fc04-4355-ae73-712700a39e5f"
+      }
+    },
+    "android": {
+      "package": "com.damianmendoza1087.fiambreriaapp"
+    }
+  }
+}
