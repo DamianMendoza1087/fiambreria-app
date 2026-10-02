@@ -967,6 +967,15 @@ return (
             <TouchableOpacity style={styles.buttonCamera} onPress={() => toggleCamera('stock')}>
               <Text style={styles.buttonText}>{showCamera && cameraTarget === 'stock' ? '📷 Cerrar Escáner' : '📷 Escanear EAN del Producto'}</Text>
             </TouchableOpacity>
+{showCamera && cameraTarget === 'stock' && permission?.granted && (
+  <View style={styles.cameraContainer}>
+    <CameraView
+      style={StyleSheet.absoluteFillObject}
+      facing="back"
+      onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
+    />
+  </View>
+)}
 
             <TextInput style={styles.searchInput} placeholder="🔍 Buscar producto..." value={searchQueryStock} onChangeText={setSearchQueryStock} />
 
