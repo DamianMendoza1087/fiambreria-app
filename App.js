@@ -1445,8 +1445,7 @@ return (
                   </View>
                 </View>
 
-                {u.role !== 'superadmin' && (
-                  <View style={{ borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 8 }}>
+                <View style={{ borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 8 }}>
                     <TouchableOpacity style={[styles.badgeBtn, u.can_edit_records && styles.badgeBtnActiveEdit, { width: '100%', marginBottom: 6 }]} onPress={() => handleToggleModulePermission(u, 'can_edit_records')}>
                       <Text style={{ color: u.can_edit_records ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>
                         ✏ Permiso para Modificar / Cancelar Registros: {u.can_edit_records ? 'SÍ' : 'NO'}
@@ -1466,9 +1465,27 @@ return (
                       <TouchableOpacity style={[styles.badgeBtn, u.can_stock && styles.badgeBtnActive, { width: '48%', marginBottom: 6 }]} onPress={() => handleToggleModulePermission(u, 'can_stock')}>
                         <Text style={{ color: u.can_stock ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>📦 Inventario {u.can_stock ? '✓' : '✗'}</Text>
                       </TouchableOpacity>
+                      <TouchableOpacity style={[styles.badgeBtn, u.can_ingreso && styles.badgeBtnActive, { width: '48%', marginBottom: 6 }]} onPress={() => handleToggleModulePermission(u, 'can_ingreso')}>
+                        <Text style={{ color: u.can_ingreso ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>📥 Ingresos {u.can_ingreso ? '✓' : '✗'}</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity style={[styles.badgeBtn, u.can_alertas && styles.badgeBtnActive, { width: '48%', marginBottom: 6 }]} onPress={() => handleToggleModulePermission(u, 'can_alertas')}>
+                        <Text style={{ color: u.can_alertas ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>🚨 Alertas {u.can_alertas ? '✓' : '✗'}</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity style={[styles.badgeBtn, u.can_rrhh && styles.badgeBtnActive, { width: '48%', marginBottom: 6 }]} onPress={() => handleToggleModulePermission(u, 'can_rrhh')}>
+                        <Text style={{ color: u.can_rrhh ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>👨‍💼 RRHH {u.can_rrhh ? '✓' : '✗'}</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity style={[styles.badgeBtn, u.can_mrp && styles.badgeBtnActive, { width: '48%', marginBottom: 6 }]} onPress={() => handleToggleModulePermission(u, 'can_mrp')}>
+                        <Text style={{ color: u.can_mrp ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>📊 MRP {u.can_mrp ? '✓' : '✗'}</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity style={[styles.badgeBtn, u.can_verificacion && styles.badgeBtnActive, { width: '48%', marginBottom: 6 }]} onPress={() => handleToggleModulePermission(u, 'can_verificacion')}>
+                        <Text style={{ color: u.can_verificacion ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>🔍 Arqueo {u.can_verificacion ? '✓' : '✗'}</Text>
+                      </TouchableOpacity>
                     </View>
                   </View>
-                )}
               </View>
             ))}
           </ScrollView>
