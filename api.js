@@ -139,8 +139,8 @@ export const closeCashSession = async (reportedCash, closedBy, attemptNumber, br
   return await res.json();
 };
 
-export const fetchCashAuditsByDate = async (dateStr) => {
-  const res = await fetch(`${API_URL}/cash/audits?date=${dateStr}`);
+export const fetchCashAuditsByDate = async (dateStr, branchId = 1) => {
+  const res = await fetch(`${API_URL}/cash/audits?date=${dateStr}&branch_id=${branchId}`);
   if (!res.ok) throw new Error("Error al consultar arqueos de caja");
   return await res.json();
 };
@@ -163,8 +163,8 @@ export const compareEmployeesMetrics = async (email1, email2, days = 30) => {
   return await res.json();
 };
 
-export const fetchMRPStats = async (days = 7, targetDays = 3) => {
-  const res = await fetch(`${API_URL}/mrp/suggestions?days=${days}&target_days=${targetDays}`);
+export const fetchMRPStats = async (days = 7, targetDays = 3, branchId = 1) => {
+  const res = await fetch(`${API_URL}/mrp/suggestions?days=${days}&target_days=${targetDays}&branch_id=${branchId}`);
   if (!res.ok) throw new Error("Error al calcular sugerencias de compras MRP");
   return await res.json();
 };

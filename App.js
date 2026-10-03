@@ -259,7 +259,7 @@ export default function App() {
   };
 
   const loadCashAudits = async () => {
-    try { setLoading(true); setCashAuditsList(await fetchCashAuditsByDate(selectedAuditDate)); }
+    try { setLoading(true); setCashAuditsList(await fetchCashAuditsByDate(selectedAuditDate, branchId || 1)); }
     catch (e) { alert('Error cargando arqueos'); }
     finally { setLoading(false); }
   };
@@ -350,7 +350,7 @@ export default function App() {
       setLoading(true);
       await updateReplenishmentPolicy(productId, policy, email || 'superadmin', 'Cambio desde módulo MRP');
       setProducts(await fetchProducts());
-      setMrpSuggestions(await fetchMRPStats(parseInt(mrpDays,10)||7, parseInt(mrpTargetDays,10)||3));
+      setMrpSuggestions(await fetchMRPStats(parseInt(mrpDays,10)||7, parseInt(mrpTargetDays,10)||3, branchId || 1));
       setSystemAlerts(await fetchSystemAlerts());
     } catch(e) { alert(e.message); } finally { setLoading(false); }
   };
@@ -360,7 +360,7 @@ export default function App() {
       setLoading(true);
       const d = parseInt(mrpDays) || 7;
       const t = parseInt(mrpTargetDays) || 3;
-      setMrpSuggestions(await fetchMRPStats(d, t));
+      setMrpSuggestions(await fetchMRPStats(d, t, branchId || 1));
     } catch (e) { alert('Error en MRP'); }
     finally { setLoading(false); }
   };
