@@ -169,8 +169,8 @@ export const fetchMRPStats = async (days = 7, targetDays = 3, branchId = 1) => {
   return await res.json();
 };
 
-export const fetchSystemAlerts = async () => {
-  const res = await fetch(`${API_URL}/alerts`);
+export const fetchSystemAlerts = async (branchId = 1) => {
+  const res = await fetch(`${API_URL}/alerts?branch_id=${branchId}`);
   if (!res.ok) throw new Error("Error al consultar alertas del sistema");
   return await res.json();
 };
@@ -181,13 +181,13 @@ export const fetchProductLots = async (productId, branchId = 1) => {
   return await res.json();
 };
 
-export const fetchKPIsDashboard = async (period = "month") => {
-  const res = await fetch(`${API_URL}/kpis/dashboard?period=${encodeURIComponent(period)}`);
+export const fetchKPIsDashboard = async (period = "month", branchId = 1) => {
+  const res = await fetch(`${API_URL}/kpis/dashboard?period=${encodeURIComponent(period)}&branch_id=${branchId}`);
   if (!res.ok) throw new Error("Error al obtener indicadores KPI");
   return await res.json();
 };
-export const fetchProfitability = async (period = "month") => {
-  const res = await fetch(`${API_URL}/kpis/profitability?period=${encodeURIComponent(period)}`);
+export const fetchProfitability = async (period = "month", branchId = 1) => {
+  const res = await fetch(`${API_URL}/kpis/profitability?period=${encodeURIComponent(period)}&branch_id=${branchId}`);
   if (!res.ok) throw new Error("Error al obtener rentabilidad");
   return await res.json();
 };

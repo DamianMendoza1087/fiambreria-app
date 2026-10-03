@@ -218,7 +218,7 @@ export default function App() {
       setCashStatus(cs);
       if (cs.is_open && cs.session_id) setCashMovements(await fetchCashMovements(cs.session_id, activeBranch));
       else setCashMovements([]);
-      setSystemAlerts(await fetchSystemAlerts());
+      setSystemAlerts(await fetchSystemAlerts(branchId || 1));
       setActiveHRShifts(await fetchActiveHRShifts());
 
       const currentUser = users.find(u => u.email === email);
@@ -271,7 +271,7 @@ export default function App() {
   };
 
   const loadAlertsData = async () => {
-    try { setLoading(true); setSystemAlerts(await fetchSystemAlerts()); }
+    try { setLoading(true); setSystemAlerts(await fetchSystemAlerts(branchId || 1)); }
     catch (e) { alert('Error cargando alertas'); }
     finally { setLoading(false); }
   };
@@ -329,7 +329,7 @@ export default function App() {
   };
 
   const refreshAlertsV2 = async () => {
-    setSystemAlerts(await fetchSystemAlerts());
+    setSystemAlerts(await fetchSystemAlerts(branchId || 1));
     if (showAlertHistory) setAlertHistory(await fetchAlertHistory());
   };
   const handleAlertAction = async (item, action) => {
@@ -351,7 +351,7 @@ export default function App() {
       await updateReplenishmentPolicy(productId, policy, email || 'superadmin', 'Cambio desde módulo MRP');
       setProducts(await fetchProducts());
       setMrpSuggestions(await fetchMRPStats(parseInt(mrpDays,10)||7, parseInt(mrpTargetDays,10)||3, branchId || 1));
-      setSystemAlerts(await fetchSystemAlerts());
+      setSystemAlerts(await fetchSystemAlerts(branchId || 1));
     } catch(e) { alert(e.message); } finally { setLoading(false); }
   };
 
@@ -611,7 +611,7 @@ export default function App() {
     try {
       setLoading(true);
       const val = parseFloat(countedQtyInput.replace(',', '.'));
-      await submitStockAudit(selectedAuditProd.id, val, email);
+      await submitStockAudit(selectedAuditProd.id, val, email, branchId || 1);
       alert(`✅ Conteo guardado: ${val} ${selectedAuditProd.unit_type}`);
       setSelectedAuditProd(null); setCountedQtyInput(''); setSearchQueryStock('');
       await loadInitialData();
