@@ -57,7 +57,7 @@ export default function App() {
   const [ingressProductId, setIngressProductId] = useState(null);
   const [prodBrand, setProdBrand] = useState('');
   const [prodLotNumber, setProdLotNumber] = useState('');
-  const [prodRequiresExpiration, setProdRequiresExpiration] = useState(true);
+  const [prodRequiresExpiration, setProdRequiresExpiration] = useState(false);
   const [ingressSearch, setIngressSearch] = useState('');
   const [ingressMatches, setIngressMatches] = useState([]);
 
@@ -381,7 +381,7 @@ export default function App() {
   const resetIngressForm = () => {
     setIngressProductId(null); setProdName(''); setProdCategory('Varios'); setProdBrand('');
     setProdCost(''); setProdPrice(''); setProdSupplier(''); setProdStock(''); setProdUnitType('unid');
-    setProdBarcode(''); setProdExpirationDate(''); setProdLotNumber(''); setProdRequiresExpiration(true);
+    setProdBarcode(''); setProdExpirationDate(''); setProdLotNumber(''); setProdRequiresExpiration(false);
     setIngressSearch(''); setIngressMatches([]);
   };
 
@@ -1297,6 +1297,33 @@ return (
               <Text style={{fontSize:12,color:ingressProductId?'#28a745':'#666',marginBottom:8}}>{ingressProductId ? `✓ Producto existente #${ingressProductId}` : 'Producto nuevo / sin EAN'}</Text>
               <TextInput style={styles.input} placeholder="Nombre del producto" value={prodName} onChangeText={setProdName} editable={!ingressProductId} />
               <TextInput style={styles.input} placeholder="Marca (opcional)" value={prodBrand} onChangeText={setProdBrand} editable={!ingressProductId} />
+              <Text style={{fontWeight:'bold',marginTop:8,marginBottom:6}}>
+                ¿Este producto tiene vencimiento?
+              </Text>
+
+              <View style={{flexDirection:'row',marginBottom:10}}>
+                <TouchableOpacity
+                  style={[styles.typeBtn,!prodRequiresExpiration && styles.typeBtnActive]}
+                  onPress={() => {
+                    setProdRequiresExpiration(false);
+                    setProdExpirationDate('');
+                  }}
+                >
+                  <Text style={{color:!prodRequiresExpiration?'#fff':'#333',fontWeight:'bold'}}>
+                    NO
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.typeBtn,prodRequiresExpiration && styles.typeBtnActive,{marginLeft:8}]}
+                  onPress={() => setProdRequiresExpiration(true)}
+                >
+                  <Text style={{color:prodRequiresExpiration?'#fff':'#333',fontWeight:'bold'}}>
+                    SÍ
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
               <TextInput style={styles.input} placeholder="Categoría" value={prodCategory} onChangeText={setProdCategory} editable={!ingressProductId} />
               <Text style={styles.subSectionTitle}>2. Datos del lote / compra</Text>
               <TextInput style={styles.input} placeholder="Proveedor" value={prodSupplier} onChangeText={setProdSupplier} />
