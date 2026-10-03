@@ -13,8 +13,8 @@ export const loginUser = async (email, password) => {
   return await response.json();
 };
 
-export const fetchProducts = async () => {
-  const res = await fetch(`${API_URL}/products`);
+export const fetchProducts = async (branchId = 1) => {
+  const res = await fetch(`${API_URL}/products?branch_id=${branchId}`);
   if (!res.ok) throw new Error("Error al obtener productos");
   return await res.json();
 };
@@ -192,14 +192,14 @@ export const fetchProfitability = async (period = "month") => {
   return await res.json();
 };
 
-export const fetchProductByBarcode = async (barcode) => {
-  const res = await fetch(`${API_URL}/products/by-barcode/${encodeURIComponent(barcode)}`);
+export const fetchProductByBarcode = async (barcode, branchId = 1) => {
+  const res = await fetch(`${API_URL}/products/by-barcode/${encodeURIComponent(barcode)}?branch_id=${branchId}`);
   if (res.status === 404) return null;
   if (!res.ok) throw new Error("Error buscando EAN");
   return await res.json();
 };
-export const searchProducts = async (q) => {
-  const res = await fetch(`${API_URL}/products/search?q=${encodeURIComponent(q || "")}`);
+export const searchProducts = async (q, branchId = 1) => {
+  const res = await fetch(`${API_URL}/products/search?q=${encodeURIComponent(q || "")}&branch_id=${branchId}`);
   if (!res.ok) throw new Error("Error buscando productos");
   return await res.json();
 };
@@ -321,4 +321,43 @@ export const updateReplenishmentPolicy = async (productId,policy,actor,reason=""
   const r=await fetch(`${API_URL}/products/${productId}/replenishment-policy`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({policy,actor,reason})});
   if(!r.ok) throw new Error((await r.json().catch(()=>({}))).detail || "Error cambiando política MRP");
   return await r.json();
+};
+
+// ===== ADMINISTRACION MULTILOCAL / FERIA =====
+
+export const fetchBranchProductsAdmin = async (branchId) => {
+  const res = await fetch(`${API_URL}/branches/${branchId}/products`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Error obteniendo productos de sucursal");
+  }
+  return await res.json();
+};
+
+export const configureBranchProduct = async (branchId, productId, data) => {
+  const res = await fetch(`${API_URL}/branches/${branchId}/products/${productId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Error configurando producto de sucursal");
+  }
+
+  return await res.json();
+};
+
+export const removeBranchProduct = async (branchId, productId) => {
+  const res = await fetch(`${API_URL}/branches/${branchId}/products/${productId}`, {
+    method: "DELETE",
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Error retirando producto de sucursal");
+  }
+
+  return await res.json();
 };

@@ -1,9 +1,68 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProfitability, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, updateIngress, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled, actOnAlert, fetchAlertHistory, updateReplenishmentPolicy } from './api';
+import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProfitability, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, updateIngress, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled, actOnAlert, fetchAlertHistory, updateReplenishmentPolicy , fetchBranchProductsAdmin, configureBranchProduct, removeBranchProduct } from './api';
 
 export default function App() {
+  const loadBranchAdminProducts = async () => {
+    if (!branchId) return;
+    try {
+      setLoading(true);
+      const data = await fetchBranchProductsAdmin(branchId);
+      setBranchAdminProducts(data);
+      const drafts = {};
+      data.forEach(x => {
+        drafts[x.product_id] = String(x.branch_price ?? x.base_price ?? '');
+      });
+      setBranchPriceDrafts(drafts);
+    } catch (e) {
+      alert(e.message || 'No se pudo cargar el catálogo de sucursal');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveBranchProductConfig = async (item, changes = {}) => {
+    try {
+      setLoading(true);
+
+      const rawPrice = branchPriceDrafts[item.product_id];
+      const price = Number(String(rawPrice ?? item.branch_price ?? item.base_price).replace(',', '.'));
+
+      if (!Number.isFinite(price) || price < 0) {
+        alert('Ingresá un precio válido');
+        return;
+      }
+
+      await configureBranchProduct(branchId, item.product_id, {
+        price_per_unit: price,
+        is_available: changes.is_available ?? item.is_available,
+        is_exclusive: changes.is_exclusive ?? item.is_exclusive
+      });
+
+      await loadBranchAdminProducts();
+      const refreshed = await fetchProducts(branchId || 1);
+      setProducts(refreshed);
+    } catch (e) {
+      alert(e.message || 'No se pudo guardar');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const disableBranchProduct = async (item) => {
+    try {
+      setLoading(true);
+      await removeBranchProduct(branchId, item.product_id);
+      await loadBranchAdminProducts();
+      setProducts(await fetchProducts(branchId || 1));
+    } catch (e) {
+      alert(e.message || 'No se pudo retirar el producto');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const formatMoney = (value) => {
     const n=Number(value || 0);
     return '$'+n.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -14,7 +73,9 @@ export default function App() {
   const [branchSelectorPending, setBranchSelectorPending] = useState(false);
 
   const branchName = branchId === 2 ? 'Feria Damyale' : 'Fiambrería Local';
-  
+  const isAdminLevel = userRole === 'masteradmin' || userRole === 'superadmin';
+  const isMasterAdmin = userRole === 'masteradmin';
+
   // Permisos dinámicos por módulo y edición
   const [isAccountActive, setIsAccountActive] = useState(false);
   const [canPreventa, setCanPreventa] = useState(true);
@@ -29,7 +90,12 @@ export default function App() {
   const [canEditRecords, setCanEditRecords] = useState(false);
 
   const [currentTab, setCurrentTab] = useState('preventa');
-  
+  // Administración de catálogo por sucursal
+  const [branchAdminProducts, setBranchAdminProducts] = useState([]);
+  const [branchAdminSearch, setBranchAdminSearch] = useState('');
+  const [branchPriceDrafts, setBranchPriceDrafts] = useState({});
+
+
   // Login
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -49,7 +115,7 @@ export default function App() {
   // Ingreso / Edición de Producto
   const [editingProductId, setEditingProductId] = useState(null);
   const [prodName, setProdName] = useState('');
-  const [prodCategory, setProdCategory] = useState('Varios');
+  const [prodCategory, setProdCategory] = useState('');
   const [prodCost, setProdCost] = useState('');
   const [prodPrice, setProdPrice] = useState('');
   const [prodSupplier, setProdSupplier] = useState('');
@@ -107,7 +173,7 @@ export default function App() {
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPass, setNewUserPass] = useState('');
-  
+
   const [empCompare1, setEmpCompare1] = useState('');
   const [empCompare2, setEmpCompare2] = useState('');
   const [comparisonResult, setComparisonResult] = useState(null);
@@ -139,7 +205,7 @@ export default function App() {
 
   const loadInitialData = async () => {
     try {
-      setProducts(await fetchProducts());
+      setProducts(await fetchProducts(branchId || 1));
       const users = await fetchUsers();
       setUsersList(users);
       if (users.length > 1) {
@@ -312,7 +378,7 @@ export default function App() {
       setCanMRP(res.can_mrp); setCanVerificacion(res.can_verificacion); setCanKPIs(res.can_kpis);
       setCanEditRecords(res.can_edit_records);
 
-      if ((res.role || 'vendedor') === 'superadmin') {
+      if (['masteradmin', 'superadmin'].includes(res.role || 'vendedor')) {
         setBranchId(null);
         setBranchSelectorPending(true);
       } else {
@@ -339,7 +405,7 @@ export default function App() {
   };
 
   const changeBranch = () => {
-    if (userRole !== 'superadmin') return;
+    if (!isAdminLevel) return;
     setBranchSelectorPending(true);
   };
 
@@ -396,7 +462,7 @@ export default function App() {
     const clean=(code || '').trim(); setProdBarcode(clean);
     if (!clean) { setIngressProductId(null); return; }
     try {
-      const found=await fetchProductByBarcode(clean);
+      const found=await fetchProductByBarcode(clean, branchId || 1);
       if (found) { selectIngressProduct(found); alert(`Producto reconocido: ${found.name}`); }
       else { setIngressProductId(null); alert('EAN nuevo. Completa los datos para crear el producto.'); }
     } catch(e) { alert(e.message); }
@@ -407,7 +473,7 @@ export default function App() {
     try { setIngressMatches(await searchProducts(q.trim())); } catch(e) { setIngressMatches([]); }
   };
   const resetIngressForm = () => {
-    setIngressProductId(null); setProdName(''); setProdCategory('Varios'); setProdBrand('');
+    setIngressProductId(null); setProdName(''); setProdCategory(''); setProdBrand('');
     setProdCost(''); setProdPrice(''); setProdSupplier(''); setProdStock(''); setProdUnitType('unid');
     setProdBarcode(''); setProdExpirationDate(''); setProdLotNumber(''); setProdRequiresExpiration(false);
     setIngressSearch(''); setIngressMatches([]);
@@ -470,7 +536,8 @@ export default function App() {
 
   const handleSaveIngressV2 = async () => {
     const qty=parseFloat((prodStock || '').replace(',','.')), cost=parseFloat((prodCost || '').replace(',','.')), price=parseFloat((prodPrice || '').replace(',','.'));
-    if (!prodName.trim() || !Number.isFinite(qty) || qty<=0 || !Number.isFinite(cost) || cost<0 || !Number.isFinite(price)) return alert('Completa producto, costo, PVP y cantidad.');
+    if (!prodName.trim() || !Number.isFinite(qty) || qty<=0 || !Number.isFinite(cost) || cost<0 || !Number.isFinite(price)) return alert('Completá producto, costo, PVP y cantidad.');
+    if (!ingressProductId && !prodCategory.trim()) return alert('Seleccioná o escribí una categoría.');
     if (prodRequiresExpiration && !prodExpirationDate.trim()) return alert('Este producto requiere fecha de vencimiento.');
     if (prodRequiresExpiration && !/^\d{2}-\d{2}-\d{4}$/.test(prodExpirationDate.trim())) return alert('Vencimiento invalido. Usa DD-MM-AAAA.');
     if (prodRequiresExpiration) {
@@ -481,7 +548,7 @@ export default function App() {
     try {
       setLoading(true); let productId=ingressProductId;
       if (!productId) {
-        const created=await createProductMaster({name:prodName.trim(),category:prodCategory||'Varios',brand:prodBrand||null,barcode:prodBarcode.trim()||null,price_per_unit:price,unit_type:prodUnitType,requires_expiration:prodRequiresExpiration,replenishment_policy:'MRP',is_active:true});
+        const created=await createProductMaster({name:prodName.trim(),category:prodCategory.trim(),brand:prodBrand||null,barcode:prodBarcode.trim()||null,price_per_unit:price,unit_type:prodUnitType,requires_expiration:prodRequiresExpiration,replenishment_policy:'MRP',is_active:true});
         productId=created.id;
       }
       await createIngress({product_id:productId,supplier:prodSupplier||null,cost_price:cost,quantity:qty,lot_number:prodLotNumber||null,expiration_date:prodRequiresExpiration?prodExpirationDate:null,received_by:email,notes:'Ingreso desde App V2'}, branchId || 1);
@@ -809,6 +876,9 @@ export default function App() {
   };
 
   const handleRoleChange = async (user, newRole) => {
+    if (user.email?.toLowerCase() === 'admin@fiambreria.com') {
+      return alert('SolidSnake es el Admin Maestro y no puede ser degradado.');
+    }
     try {
       setLoading(true);
       await updateUserPermissions(user.id, { role: newRole });
@@ -833,7 +903,7 @@ export default function App() {
     );
   }
 
-  if (branchSelectorPending && userRole === 'superadmin') {
+  if (branchSelectorPending && isAdminLevel) {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.branchSelectScreen}>
@@ -913,7 +983,7 @@ return (
         {currentTab === 'preventa' && (canPreventa || userRole === 'superadmin') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>🛒 Pre-venta (Mostrador)</Text>
-            
+
             <TouchableOpacity style={styles.buttonCamera} onPress={() => toggleCamera('preventa')}>
               <Text style={styles.buttonText}>{showCamera && cameraTarget === 'preventa' ? '📷 Cerrar Escáner' : '📷 Escanear EAN con Cámara'}</Text>
             </TouchableOpacity>
@@ -966,7 +1036,7 @@ return (
                 </View>
               ))
             )}
-            
+
             <TouchableOpacity style={styles.buttonPrimary} onPress={handleGeneratePreSale} disabled={loading}>
               <Text style={styles.buttonText}>📝 Enviar Pre-venta a Caja</Text>
             </TouchableOpacity>
@@ -1397,7 +1467,14 @@ return (
                 </TouchableOpacity>
               </View>
 
-              <TextInput style={styles.input} placeholder="Categoría" value={prodCategory} onChangeText={setProdCategory} editable={!ingressProductId} />
+              <Text style={{fontSize:12,fontWeight:'bold',color:'#555',marginBottom:4}}>Categoría</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Seleccionar / escribir categoría"
+                value={prodCategory}
+                onChangeText={setProdCategory}
+                editable={!ingressProductId}
+              />
               <Text style={styles.subSectionTitle}>2. Datos del lote / compra</Text>
               <TextInput style={styles.input} placeholder="Proveedor" value={prodSupplier} onChangeText={setProdSupplier} />
               <TextInput style={styles.input} placeholder="N° de lote (opcional)" value={prodLotNumber} onChangeText={setProdLotNumber} />
@@ -1405,7 +1482,7 @@ return (
               <TextInput style={styles.input} placeholder="Precio PVP ($)" keyboardType="decimal-pad" value={prodPrice} onChangeText={setProdPrice} />
               <TextInput style={styles.input} placeholder={`Cantidad (${prodUnitType})`} keyboardType="decimal-pad" value={prodStock} onChangeText={setProdStock} />
               <View style={{flexDirection:'row',marginBottom:10}}>{['unid','kg'].map(t=><TouchableOpacity key={t} style={[styles.typeBtn,{marginRight:8},prodUnitType===t&&{backgroundColor:'#007bff'}]} onPress={()=>setProdUnitType(t)}><Text style={{color:prodUnitType===t?'#fff':'#333',fontWeight:'bold'}}>{t==='kg'?'⚖ Peso (kg)':'📦 Unidad'}</Text></TouchableOpacity>)}</View>
-              <TouchableOpacity style={[styles.typeBtn,{marginBottom:10,backgroundColor:prodRequiresExpiration?'#ffc107':'#6c757d'}]} onPress={()=>{const next=!prodRequiresExpiration;setProdRequiresExpiration(next);if(!next)setProdExpirationDate('');}}><Text style={{color:'#fff',fontWeight:'bold'}}>{prodRequiresExpiration?'📅 Requiere vencimiento':'✓ Producto sin vencimiento'}</Text></TouchableOpacity>
+
               {prodRequiresExpiration && <>
                 <Text style={{fontSize:12,fontWeight:'bold',color:'#555'}}>Vencimiento (DD-MM-AAAA)</Text>
                 <TextInput
@@ -1428,7 +1505,7 @@ return (
               <TouchableOpacity style={[styles.buttonPrimary,{backgroundColor:'#6c757d'}]} onPress={resetIngressForm}><Text style={styles.buttonText}>Limpiar formulario</Text></TouchableOpacity>
             </View>
 
-            {userRole === 'superadmin' && (
+            {isAdminLevel && (
               <View style={styles.card}>
                 <Text style={styles.subSectionTitle}>Correccion auditada de ingresos</Text>
                 <Text style={{fontSize:11,color:'#666',marginBottom:8}}>Solo SuperAdmin. Toda correccion requiere un motivo.</Text>
@@ -1481,6 +1558,138 @@ return (
           {currentTab === 'catalogo' && (canStock || userRole === 'superadmin') && (
             <ScrollView style={styles.body} contentContainerStyle={styles.scrollPadding}>
               <Text style={styles.sectionTitle}>Lista de precios</Text>
+
+              {isAdminLevel && (
+                <View style={styles.card}>
+                  <Text style={styles.subSectionTitle}>
+                    🏪 Administración · {branchName}
+                  </Text>
+
+                  <Text style={{fontSize:12,color:'#666',marginBottom:10}}>
+                    Habilitá productos, definí el precio de esta sucursal y marcá exclusivos.
+                    El stock continúa separado por sucursal.
+                  </Text>
+
+                  <TouchableOpacity
+                    style={styles.buttonPrimary}
+                    onPress={loadBranchAdminProducts}
+                    disabled={loading}
+                  >
+                    <Text style={styles.buttonText}>
+                      {loading ? 'Cargando...' : 'Administrar productos de esta sucursal'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {branchAdminProducts.length > 0 && (
+                    <>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Buscar producto..."
+                        value={branchAdminSearch}
+                        onChangeText={setBranchAdminSearch}
+                      />
+
+                      {branchAdminProducts
+                        .filter(x =>
+                          !branchAdminSearch.trim() ||
+                          (x.name || '').toLowerCase().includes(branchAdminSearch.toLowerCase()) ||
+                          (x.barcode || '').includes(branchAdminSearch)
+                        )
+                        .slice(0, 100)
+                        .map(item => (
+                          <View
+                            key={'branch-admin-' + item.product_id}
+                            style={{
+                              paddingVertical:12,
+                              borderBottomWidth:1,
+                              borderBottomColor:'#ddd'
+                            }}
+                          >
+                            <Text style={{fontWeight:'bold'}}>
+                              {item.name}
+                            </Text>
+
+                            <Text style={{fontSize:11,color:'#666',marginBottom:7}}>
+                              Stock {branchName}: {item.stock}
+                              {item.barcode ? ' · EAN ' + item.barcode : ''}
+                            </Text>
+
+                            <TextInput
+                              style={styles.input}
+                              keyboardType="decimal-pad"
+                              placeholder="Precio de esta sucursal"
+                              value={branchPriceDrafts[item.product_id] ?? ''}
+                              onChangeText={v =>
+                                setBranchPriceDrafts(prev => ({
+                                  ...prev,
+                                  [item.product_id]: v
+                                }))
+                              }
+                            />
+
+                            <View style={{flexDirection:'row',gap:6,marginBottom:7}}>
+                              <TouchableOpacity
+                                style={[
+                                  styles.typeBtn,
+                                  item.is_available && styles.typeBtnActive
+                                ]}
+                                onPress={() =>
+                                  saveBranchProductConfig(item,{
+                                    is_available: !item.is_available
+                                  })
+                                }
+                              >
+                                <Text>
+                                  {item.is_available ? '✓ Habilitado' : '+ Habilitar'}
+                                </Text>
+                              </TouchableOpacity>
+
+                              {branchId === 2 && (
+                                <TouchableOpacity
+                                  style={[
+                                    styles.typeBtn,
+                                    item.is_exclusive && styles.typeBtnActive
+                                  ]}
+                                  onPress={() =>
+                                    saveBranchProductConfig(item,{
+                                      is_exclusive: !item.is_exclusive,
+                                      is_available: true
+                                    })
+                                  }
+                                >
+                                  <Text>
+                                    {item.is_exclusive ? '★ Exclusivo Feria' : 'Compartido'}
+                                  </Text>
+                                </TouchableOpacity>
+                              )}
+                            </View>
+
+                            <TouchableOpacity
+                              style={styles.buttonSuccess}
+                              onPress={() => saveBranchProductConfig(item)}
+                            >
+                              <Text style={styles.buttonText}>
+                                Guardar precio
+                              </Text>
+                            </TouchableOpacity>
+
+                            {item.is_available && branchId === 2 && (
+                              <TouchableOpacity
+                                style={[styles.buttonPrimary,{backgroundColor:'#6c757d'}]}
+                                onPress={() => disableBranchProduct(item)}
+                              >
+                                <Text style={styles.buttonText}>
+                                  Retirar de Feria
+                                </Text>
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                        ))}
+                    </>
+                  )}
+                </View>
+              )}
+
               <Text style={{color:'#666',marginBottom:10}}>Vista para clientes. No incluye costo, margen ni proveedor.</Text>
               <Text style={styles.subSectionTitle}>Categoria</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:10}}>
@@ -1511,10 +1720,10 @@ return (
             </ScrollView>
           )}
 
-        {currentTab === 'permisos' && userRole === 'superadmin' && (
+        {currentTab === 'permisos' && isAdminLevel && (
           <ScrollView contentContainerStyle={styles.scrollPadding}>
             <Text style={styles.sectionTitle}>👥 Permisos por Módulo y Roles</Text>
-            
+
             <View style={styles.card}>
               <Text style={styles.subSectionTitle}>Registrar Nuevo Usuario</Text>
               <TextInput style={styles.input} placeholder="Nombre Completo" value={newUserName} onChangeText={setNewUserName} />
@@ -1529,7 +1738,11 @@ return (
             {usersList.map(u => (
               <View key={u.id} style={styles.card}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <Text style={{ fontWeight: 'bold', fontSize: 15 }}>{u.name} ({u.email})</Text>
+                  <Text style={{ fontWeight: 'bold', fontSize: 15 }}>
+                    {u.email?.toLowerCase() === 'admin@fiambreria.com'
+                      ? '🐍 SolidSnake · Admin Maestro'
+                      : `${u.name} (${u.email})`}
+                  </Text>
 
                   {/* Selector de Rol */}
                   <View style={{ flexDirection: 'row' }}>
@@ -1658,7 +1871,7 @@ return (
             </TouchableOpacity>
           )}
 
-          {userRole === 'superadmin' && (
+          {isAdminLevel && (
             <TouchableOpacity style={[styles.navBtn, currentTab === 'permisos' && styles.navActive]} onPress={() => handleTabChange('permisos')}>
               <Text style={styles.navIcon}>👥</Text>
               <Text style={styles.navText}>Permisos</Text>
