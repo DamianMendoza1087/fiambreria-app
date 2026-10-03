@@ -284,3 +284,19 @@ export const setUserEnabled = async (userId, isActive) => {
   if (!res.ok) throw new Error((await res.json().catch(()=>({}))).detail || "Error cambiando estado");
   return await res.json();
 };
+
+export const actOnAlert = async (alertKey, action, actor, note="", snoozeHours=24) => {
+  const r=await fetch(`${API_URL}/alerts/${encodeURIComponent(alertKey)}/action`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action,actor,note,snooze_hours:snoozeHours})});
+  if(!r.ok) throw new Error((await r.json().catch(()=>({}))).detail || "Error actualizando alerta");
+  return await r.json();
+};
+export const fetchAlertHistory = async (limit=100) => {
+  const r=await fetch(`${API_URL}/alerts/history?limit=${limit}`);
+  if(!r.ok) throw new Error("Error consultando historial de alertas");
+  return await r.json();
+};
+export const updateReplenishmentPolicy = async (productId,policy,actor,reason="") => {
+  const r=await fetch(`${API_URL}/products/${productId}/replenishment-policy`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({policy,actor,reason})});
+  if(!r.ok) throw new Error((await r.json().catch(()=>({}))).detail || "Error cambiando política MRP");
+  return await r.json();
+};

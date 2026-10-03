@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled } from './api';
+import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled, actOnAlert, fetchAlertHistory, updateReplenishmentPolicy } from './api';
 
 export default function App() {
   const formatMoney = (value) => {
@@ -118,6 +118,8 @@ export default function App() {
   const [mrpDays, setMrpDays] = useState('7');
   const [mrpTargetDays, setMrpTargetDays] = useState('3');
   const [systemAlerts, setSystemAlerts] = useState([]);
+  const [alertHistory, setAlertHistory] = useState([]);
+  const [showAlertHistory, setShowAlertHistory] = useState(false);
   const [kpiData, setKpiData] = useState(null);
 
   const loadInitialData = async () => {
@@ -235,6 +237,33 @@ export default function App() {
       setComparisonResult(await compareEmployeesMetrics(empCompare1, empCompare2, 30));
     } catch (e) { alert('Error en comparativa'); }
     finally { setLoading(false); }
+  };
+
+  const refreshAlertsV2 = async () => {
+    setSystemAlerts(await fetchSystemAlerts());
+    if (showAlertHistory) setAlertHistory(await fetchAlertHistory());
+  };
+  const handleAlertAction = async (item, action) => {
+    try {
+      setLoading(true);
+      await actOnAlert(item.id, action, email || 'superadmin', action === 'SNOOZED' ? 'Pospuesta 24 horas' : 'Acción desde app', 24);
+      await refreshAlertsV2();
+    } catch(e) { alert(e.message); } finally { setLoading(false); }
+  };
+  const handleAlertHistory = async () => {
+    try {
+      const next=!showAlertHistory; setShowAlertHistory(next);
+      if(next) setAlertHistory(await fetchAlertHistory());
+    } catch(e) { alert(e.message); }
+  };
+  const handleReplenishmentPolicy = async (productId, policy) => {
+    try {
+      setLoading(true);
+      await updateReplenishmentPolicy(productId, policy, email || 'superadmin', 'Cambio desde módulo MRP');
+      setProducts(await fetchProducts());
+      setMrpSuggestions(await fetchMRPStats(parseInt(mrpDays,10)||7, parseInt(mrpTargetDays,10)||3));
+      setSystemAlerts(await fetchSystemAlerts());
+    } catch(e) { alert(e.message); } finally { setLoading(false); }
   };
 
   const loadMRPData = async () => {
@@ -1013,24 +1042,31 @@ return (
           </ScrollView>
         )}
 
-        {/* ALERTAS */}
+        {/* ALERTAS V2 */}
         {currentTab === 'alertas' && (canAlertas || userRole === 'superadmin') && (
           <ScrollView contentContainerStyle={styles.scrollPadding}>
-            <Text style={styles.sectionTitle}>🚨 Centro de Alertas Críticas</Text>
-            <TouchableOpacity style={styles.buttonPrimary} onPress={loadAlertsData} disabled={loading}>
-              <Text style={styles.buttonText}>🔄 Actualizar Alertas</Text>
-            </TouchableOpacity>
-
-            <Text style={styles.subSectionTitle}>Notificaciones del Sistema ({systemAlerts.length})</Text>
-            {systemAlerts.map(alert => (
-              <View key={alert.id} style={[styles.card, { backgroundColor: alert.level === 'CRITICAL' ? '#f8d7da' : '#fff3cd', borderColor: alert.level === 'CRITICAL' ? '#f5c6cb' : '#ffeeba', borderWidth: 1 }]}>
-                <Text style={{ fontWeight: 'bold', fontSize: 15, color: '#333' }}>{alert.title}</Text>
-                <Text style={{ fontSize: 12, color: '#555', marginTop: 4 }}>{alert.detail}</Text>
+            <Text style={styles.sectionTitle}>🚨 Alertas críticas y operativas</Text>
+            <View style={{flexDirection:'row',marginBottom:10}}>
+              <TouchableOpacity style={[styles.buttonPrimary,{flex:1,marginRight:5}]} onPress={refreshAlertsV2}><Text style={styles.buttonText}>↻ Actualizar</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.buttonPrimary,{flex:1,marginLeft:5,backgroundColor:'#6c757d'}]} onPress={handleAlertHistory}><Text style={styles.buttonText}>{showAlertHistory?'Ocultar historial':'Ver historial'}</Text></TouchableOpacity>
+            </View>
+            {systemAlerts.length===0 && <View style={styles.card}><Text>✅ No hay alertas activas.</Text></View>}
+            {systemAlerts.map(item=><View key={item.id} style={styles.card}>
+              <Text style={{fontWeight:'bold',fontSize:15,color:item.severity==='CRITICAL'?'#dc3545':item.severity==='IMPORTANT'?'#fd7e14':'#555'}}>{item.severity==='CRITICAL'?'🔴':item.severity==='IMPORTANT'?'🟠':'🔵'} {item.title}</Text>
+              <Text style={{fontSize:12,color:'#555',marginVertical:6}}>{item.detail}</Text>
+              <Text style={{fontSize:10,color:'#777'}}>Estado: {item.state||'NEW'} · Tipo: {item.type}</Text>
+              <View style={{flexDirection:'row',flexWrap:'wrap',marginTop:8}}>
+                <TouchableOpacity style={[styles.typeBtn,{marginRight:5,marginBottom:5}]} onPress={()=>handleAlertAction(item,'SEEN')}><Text>👁 Vista</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.typeBtn,{marginRight:5,marginBottom:5}]} onPress={()=>handleAlertAction(item,'SNOOZED')}><Text>⏰ 24 h</Text></TouchableOpacity>
+                {(item.actions||[]).includes('RESOLVED') && <TouchableOpacity style={[styles.typeBtn,{marginRight:5,marginBottom:5,backgroundColor:'#28a745'}]} onPress={()=>handleAlertAction(item,'RESOLVED')}><Text style={{color:'#fff'}}>✓ Resolver</Text></TouchableOpacity>}
+                <TouchableOpacity style={[styles.typeBtn,{marginRight:5,marginBottom:5,backgroundColor:'#6c757d'}]} onPress={()=>handleAlertAction(item,'DISMISSED')}><Text style={{color:'#fff'}}>Descartar</Text></TouchableOpacity>
               </View>
-            ))}
+            </View>)}
+            {showAlertHistory && <View style={styles.card}><Text style={styles.subSectionTitle}>📜 Historial auditable</Text>{alertHistory.slice(0,100).map(h=><Text key={h.id} style={{fontSize:11,paddingVertical:5,borderBottomWidth:1,borderBottomColor:'#eee'}}>{h.created_at} · {h.actor||'-'} · {h.old_state} → {h.new_state} · {h.note||''}</Text>)}</View>}
           </ScrollView>
         )}
-{/* RRHH V2 */}
+
+        {/* RRHH V2 */}
         {currentTab === 'rrhh' && (canRRHH || userRole === 'superadmin') && (
           <ScrollView contentContainerStyle={styles.scrollPadding}>
             <Text style={styles.sectionTitle}>👨‍💼 RRHH y Turnos</Text>
@@ -1081,24 +1117,30 @@ return (
           </ScrollView>
         )}
 
-        {/* MRP */}
+        {/* MRP V2 */}
         {currentTab === 'mrp' && (canMRP || userRole === 'superadmin') && (
           <ScrollView contentContainerStyle={styles.scrollPadding}>
             <Text style={styles.sectionTitle}>📦 MRP: Compras Inteligentes</Text>
-            <TouchableOpacity style={styles.buttonPrimary} onPress={loadMRPData} disabled={loading}>
-              <Text style={styles.buttonText}>📊 Recalcular Sugerencias MRP</Text>
-            </TouchableOpacity>
-
-            <Text style={styles.subSectionTitle}>🛒 Reposición Recomendada</Text>
-            {mrpSuggestions.map((item, idx) => (
-              <View key={idx} style={styles.card}>
-                <Text style={{ fontWeight: 'bold', fontSize: 16 }}>{item.product_name}</Text>
-                <Text style={{ fontSize: 12, color: '#666' }}>Proveedor: {item.supplier}</Text>
-                <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#007bff', marginTop: 4 }}>
-                  💡 Comprar: {item.suggested_buy} {item.unit_type} (${item.estimated_cost})
-                </Text>
+            <View style={styles.card}>
+              <TextInput style={styles.input} placeholder="Días de ventas analizados" keyboardType="numeric" value={mrpDays} onChangeText={setMrpDays}/>
+              <TextInput style={styles.input} placeholder="Días objetivo de stock" keyboardType="numeric" value={mrpTargetDays} onChangeText={setMrpTargetDays}/>
+              <TouchableOpacity style={styles.buttonPrimary} onPress={loadMRPData} disabled={loading}><Text style={styles.buttonText}>📊 Recalcular sugerencias</Text></TouchableOpacity>
+            </View>
+            {mrpSuggestions.length===0 && <View style={styles.card}><Text>Sin compras automáticas sugeridas.</Text></View>}
+            {mrpSuggestions.map(item=><View key={item.product_id} style={styles.card}>
+              <Text style={{fontWeight:'bold'}}>{item.product_name}</Text>
+              <Text>Stock: {item.current_stock} · Comprar: {item.suggested_buy} · {formatMoney(item.estimated_cost)}</Text>
+              <Text style={{fontSize:11}}>Política: {item.replenishment_policy||'MRP'}</Text>
+              <View style={{flexDirection:'row',flexWrap:'wrap',marginTop:6}}>
+                {[['MRP','🤖 Automático'],['MANUAL','✋ Manual'],['PAUSED','⏸ No reponer'],['DISCONTINUED','⛔ Discontinuado']].map(([pol,label])=><TouchableOpacity key={pol} style={[styles.typeBtn,{marginRight:4,marginBottom:4}]} onPress={()=>handleReplenishmentPolicy(item.product_id,pol)}><Text>{label}</Text></TouchableOpacity>)}
               </View>
-            ))}
+            </View>)}
+            <View style={styles.card}><Text style={styles.subSectionTitle}>Política de productos</Text>
+              {products.filter(p=>p.is_active).slice(0,100).map(p=><View key={p.id} style={{paddingVertical:6,borderBottomWidth:1,borderBottomColor:'#eee'}}>
+                <Text style={{fontWeight:'bold'}}>{p.name}</Text><Text style={{fontSize:10}}>Stock {p.stock} · {p.replenishment_policy||'MRP'}</Text>
+                <View style={{flexDirection:'row',flexWrap:'wrap'}}>{[['MRP','Automático'],['MANUAL','Manual'],['PAUSED','No reponer']].map(([pol,label])=><TouchableOpacity key={pol} style={[styles.typeBtn,{marginRight:4,marginTop:4},(p.replenishment_policy||'MRP')===pol&&{backgroundColor:'#007bff'}]} onPress={()=>handleReplenishmentPolicy(p.id,pol)}><Text style={{fontSize:10,color:(p.replenishment_policy||'MRP')===pol?'#fff':'#333'}}>{label}</Text></TouchableOpacity>)}</View>
+              </View>)}
+            </View>
           </ScrollView>
         )}
 
