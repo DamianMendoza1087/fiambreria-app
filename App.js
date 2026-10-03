@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled, actOnAlert, fetchAlertHistory, updateReplenishmentPolicy } from './api';
+import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProfitability, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled, actOnAlert, fetchAlertHistory, updateReplenishmentPolicy } from './api';
 
 export default function App() {
   const formatMoney = (value) => {
@@ -121,6 +121,8 @@ export default function App() {
   const [alertHistory, setAlertHistory] = useState([]);
   const [showAlertHistory, setShowAlertHistory] = useState(false);
   const [kpiData, setKpiData] = useState(null);
+  const [kpiPeriod, setKpiPeriod] = useState('month');
+  const [profitabilityData, setProfitabilityData] = useState(null);
 
   const loadInitialData = async () => {
     try {
@@ -194,10 +196,17 @@ export default function App() {
     finally { setLoading(false); }
   };
 
-  const loadKPIData = async () => {
-    try { setLoading(true); setKpiData(await fetchKPIsDashboard()); }
-    catch (e) { alert('Error cargando KPIs'); }
+  const loadKPIData = async (period = kpiPeriod) => {
+    try {
+      setLoading(true);
+      const [dashboard, profitability] = await Promise.all([fetchKPIsDashboard(period), fetchProfitability(period)]);
+      setKpiData(dashboard); setProfitabilityData(profitability);
+    } catch (e) { alert('Error cargando KPIs: ' + e.message); }
     finally { setLoading(false); }
+  };
+  const changeKPIPeriod = async (period) => {
+    setKpiPeriod(period);
+    await loadKPIData(period);
   };
 
   const refreshHR = async () => {
@@ -986,59 +995,56 @@ return (
           </ScrollView>
         )}
 
-        {/* INFORMES Y KPIS */}
+        {/* KPIS V2 - RENTABILIDAD REAL */}
         {currentTab === 'kpis' && (canKPIs || userRole === 'superadmin') && (
           <ScrollView contentContainerStyle={styles.scrollPadding}>
-            <Text style={styles.sectionTitle}>📈 Informes y KPIs Ejecutivos</Text>
-
-            {kpiData ? (
-              <>
-                <View style={[styles.card, { backgroundColor: kpiData.health_status === 'EXCELENTE' ? '#d4edda' : kpiData.health_status === 'ATENCION' ? '#fff3cd' : '#f8d7da' }]}>
-                  <Text style={{ fontWeight: 'bold', fontSize: 16, color: '#333', marginBottom: 6 }}>📋 Diagnóstico del Negocio</Text>
-                  <Text style={{ fontSize: 14, color: '#222', lineHeight: 20 }}>{kpiData.summary_text}</Text>
+            <Text style={styles.sectionTitle}>📈 Rentabilidad y flujo de caja</Text>
+            <View style={{flexDirection:'row',marginBottom:10}}>
+              {[['week','7 días'],['month','Mes'],['30d','30 días']].map(([p,label]) => (
+                <TouchableOpacity key={p} style={[styles.typeBtn,{marginRight:6},kpiPeriod===p&&styles.typeBtnActive]} onPress={()=>changeKPIPeriod(p)}>
+                  <Text style={{fontWeight:'bold',color:kpiPeriod===p?'#fff':'#333'}}>{label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {profitabilityData ? (<>
+              <View style={styles.card}>
+                <Text style={styles.subSectionTitle}>💰 Resultado económico</Text>
+                <Text style={{fontSize:12,color:'#666'}}>Período: {profitabilityData.from} → {profitabilityData.to}</Text>
+                <Text style={{fontSize:13,marginTop:8}}>Ventas: {profitabilityData.sales_count}</Text>
+                <Text style={{fontSize:16,fontWeight:'bold'}}>Facturación: {formatMoney(profitabilityData.revenue)}</Text>
+                <Text>Costo mercadería vendida (COGS): {formatMoney(profitabilityData.cogs)}</Text>
+                <Text style={{fontWeight:'bold',color:'#007bff'}}>Margen bruto: {formatMoney(profitabilityData.gross_profit)} ({profitabilityData.gross_margin_pct||0}%)</Text>
+              </View>
+              <View style={styles.card}>
+                <Text style={styles.subSectionTitle}>📉 Costos y pérdidas reales</Text>
+                <Text>Mermas / pérdidas a costo: {formatMoney(profitabilityData.losses_at_cost)}</Text>
+                <Text>Gastos operativos / servicios: {formatMoney(profitabilityData.operating_expenses)}</Text>
+                <Text>Pagos a empleados: {formatMoney(profitabilityData.employee_expenses)}</Text>
+                <Text>Otros gastos económicos: {formatMoney(profitabilityData.other_expenses)}</Text>
+                <Text style={{fontWeight:'bold',marginTop:6}}>Total gastos económicos: {formatMoney(profitabilityData.economic_expenses)}</Text>
+              </View>
+              <View style={[styles.card,{backgroundColor:(profitabilityData.net_profit||0)>=0?'#d4edda':'#f8d7da'}]}>
+                <Text style={{fontSize:13,fontWeight:'bold'}}>UTILIDAD NETA</Text>
+                <Text style={{fontSize:24,fontWeight:'bold',color:(profitabilityData.net_profit||0)>=0?'#155724':'#721c24'}}>{formatMoney(profitabilityData.net_profit)}</Text>
+                <Text>Margen neto: {profitabilityData.net_margin_pct||0}%</Text>
+              </View>
+              <View style={styles.card}>
+                <Text style={styles.subSectionTitle}>🏦 Flujo de caja</Text>
+                <Text>Ventas efectivo: {formatMoney(profitabilityData.cash_flow?.sales_cash)}</Text>
+                <Text>Ventas Mercado Pago: {formatMoney(profitabilityData.cash_flow?.sales_mp)}</Text>
+                <Text>Otros ingresos de caja: {formatMoney(profitabilityData.cash_flow?.other_cash_in)}</Text>
+                <Text>Salidas totales de caja: {formatMoney(profitabilityData.cash_flow?.cash_out)}</Text>
+                <Text style={{marginTop:6}}>Pagos a proveedores: {formatMoney(profitabilityData.cash_flow?.supplier_payments)}</Text>
+                <Text>Retiros del dueño: {formatMoney(profitabilityData.cash_flow?.owner_withdrawals)}</Text>
+                <Text style={{fontSize:11,color:'#666',marginTop:8}}>Pagos de mercadería y retiros afectan caja, pero no se duplican como gasto económico.</Text>
+              </View>
+              {kpiData && <>
+                <View style={styles.card}><Text style={styles.subSectionTitle}>🚨 Estado operativo</Text><Text>Alertas críticas: {kpiData.critical_alerts_count||0}</Text><Text>Advertencias: {kpiData.warning_alerts_count||0}</Text></View>
+                <View style={styles.card}><Text style={styles.subSectionTitle}>🏆 Productos más vendidos</Text>
+                  {(kpiData.top_products||[]).map((prod,idx)=><View key={idx} style={{flexDirection:'row',justifyContent:'space-between',paddingVertical:6,borderBottomWidth:1,borderBottomColor:'#eee'}}><Text style={{fontWeight:'bold',fontSize:12}}>{idx+1}. {prod.name}</Text><Text style={{fontWeight:'bold',color:'#007bff'}}>{prod.total_qty}</Text></View>)}
                 </View>
-
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
-                  <View style={[styles.card, { flex: 0.48, marginBottom: 0 }]}>
-                    <Text style={{ fontSize: 11, color: '#666' }}>Ventas Mes Actual</Text>
-                    <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#28a745', marginTop: 4 }}>${kpiData.revenue_this_month}</Text>
-                    <Text style={{ fontSize: 11, color: kpiData.pct_growth >= 0 ? '#28a745' : '#dc3545', fontWeight: 'bold', marginTop: 2 }}>
-                      {kpiData.pct_growth >= 0 ? '▲' : '▼'} {kpiData.pct_growth}% vs mes ant.
-                    </Text>
-                  </View>
-
-                  <View style={[styles.card, { flex: 0.48, marginBottom: 0 }]}>
-                    <Text style={{ fontSize: 11, color: '#666' }}>Alertas Críticas</Text>
-                    <Text style={{ fontSize: 18, fontWeight: 'bold', color: kpiData.critical_alerts_count > 0 ? '#dc3545' : '#28a745', marginTop: 4 }}>
-                      {kpiData.critical_alerts_count} Pendientes
-                    </Text>
-                    <Text style={{ fontSize: 11, color: '#555', marginTop: 2 }}>{kpiData.warning_alerts_count} advertencias</Text>
-                  </View>
-                </View>
-
-                <View style={styles.card}>
-                  <Text style={styles.subSectionTitle}>🏆 Top 10 Productos Más Vendidos (30 días)</Text>
-                  {kpiData.top_products.map((prod, idx) => (
-                    <View key={idx} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#eee' }}>
-                      <Text style={{ fontWeight: 'bold', fontSize: 13 }}>{idx + 1}. {prod.name}</Text>
-                      <Text style={{ fontWeight: 'bold', color: '#007bff', fontSize: 13 }}>{prod.total_qty} unid/kg</Text>
-                    </View>
-                  ))}
-                </View>
-
-                <View style={styles.card}>
-                  <Text style={styles.subSectionTitle}>👨‍💼 Top 10 Empleados por Asistencia (30 días)</Text>
-                  {kpiData.top_staff.map((staff, idx) => (
-                    <View key={idx} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#eee' }}>
-                      <Text style={{ fontWeight: 'bold', fontSize: 13 }}>{idx + 1}. {staff.name}</Text>
-                      <Text style={{ fontSize: 12, color: '#555' }}>
-                        <Text style={{ fontWeight: 'bold', color: '#28a745' }}>{staff.shifts} turnos</Text> ({staff.hours} hs)
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              </>
-            ) : <ActivityIndicator size="large" color="#007bff" />}
+              </>}
+            </>) : <ActivityIndicator size="large" color="#007bff" />}
           </ScrollView>
         )}
 
