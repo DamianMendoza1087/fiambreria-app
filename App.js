@@ -279,7 +279,10 @@ export default function App() {
   const loadKPIData = async (period = kpiPeriod) => {
     try {
       setLoading(true);
-      const [dashboard, profitability] = await Promise.all([fetchKPIsDashboard(period), fetchProfitability(period)]);
+      const [dashboard, profitability] = await Promise.all([
+        fetchKPIsDashboard(period, branchId || 1),
+        fetchProfitability(period, branchId || 1)
+      ]);
       setKpiData(dashboard); setProfitabilityData(profitability);
     } catch (e) { alert('Error cargando KPIs: ' + e.message); }
     finally { setLoading(false); }
@@ -349,7 +352,7 @@ export default function App() {
     try {
       setLoading(true);
       await updateReplenishmentPolicy(productId, policy, email || 'superadmin', 'Cambio desde módulo MRP');
-      setProducts(await fetchProducts());
+      setProducts(await fetchProducts(branchId || 1));
       setMrpSuggestions(await fetchMRPStats(parseInt(mrpDays,10)||7, parseInt(mrpTargetDays,10)||3, branchId || 1));
       setSystemAlerts(await fetchSystemAlerts(branchId || 1));
     } catch(e) { alert(e.message); } finally { setLoading(false); }
@@ -494,7 +497,7 @@ export default function App() {
   const handleIngressSearch = async (q) => {
     setIngressSearch(q);
     if (q.trim().length < 2) return setIngressMatches([]);
-    try { setIngressMatches(await searchProducts(q.trim())); } catch(e) { setIngressMatches([]); }
+    try { setIngressMatches(await searchProducts(q.trim(), branchId || 1)); } catch(e) { setIngressMatches([]); }
   };
   const resetIngressForm = () => {
     setIngressProductId(null); setProdName(''); setProdCategory(''); setProdBrand('');
@@ -545,7 +548,7 @@ export default function App() {
         expiration_date: editIngressExpiration.trim() || null,
         actor: email,
         reason: editIngressReason.trim()
-      });
+      }, branchId || 1);
       alert("Ingreso corregido y auditado.");
       setEditingIngress(null);
       setEditIngressReason("");

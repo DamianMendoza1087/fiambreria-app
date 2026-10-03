@@ -230,8 +230,8 @@ export const fetchIngresses = async (productId=null, branchId=1) => {
   if (!res.ok) throw new Error("Error consultando ingresos");
   return await res.json();
 };
-export const updateIngress = async (ingressId, data) => {
-  const res = await fetch(`${API_URL}/ingresses/${ingressId}`, {
+export const updateIngress = async (ingressId, data, branchId = 1) => {
+  const res = await fetch(`${API_URL}/ingresses/${ingressId}?branch_id=${branchId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data)
