@@ -346,6 +346,7 @@ export default function App() {
   };
 
   const toggleCamera = async (targetModule) => {
+    setScanned(false);
     if (!permission?.granted) {
       const res = await requestPermission();
       if (!res.granted) return alert('Se requieren permisos de cámara.');
@@ -443,6 +444,12 @@ export default function App() {
     const qty=parseFloat((prodStock || '').replace(',','.')), cost=parseFloat((prodCost || '').replace(',','.')), price=parseFloat((prodPrice || '').replace(',','.'));
     if (!prodName.trim() || !Number.isFinite(qty) || qty<=0 || !Number.isFinite(cost) || cost<0 || !Number.isFinite(price)) return alert('Completa producto, costo, PVP y cantidad.');
     if (prodRequiresExpiration && !prodExpirationDate.trim()) return alert('Este producto requiere fecha de vencimiento.');
+    if (prodRequiresExpiration && !/^\d{2}-\d{2}-\d{4}$/.test(prodExpirationDate.trim())) return alert('Vencimiento invalido. Usa DD-MM-AAAA.');
+    if (prodRequiresExpiration) {
+      const [dd,mm,yyyy]=prodExpirationDate.trim().split('-').map(Number);
+      const d=new Date(yyyy,mm-1,dd);
+      if(d.getFullYear()!==yyyy || d.getMonth()!==mm-1 || d.getDate()!==dd) return alert('La fecha de vencimiento no existe.');
+    }
     try {
       setLoading(true); let productId=ingressProductId;
       if (!productId) {
@@ -1299,7 +1306,24 @@ return (
               <TextInput style={styles.input} placeholder={`Cantidad (${prodUnitType})`} keyboardType="decimal-pad" value={prodStock} onChangeText={setProdStock} />
               <View style={{flexDirection:'row',marginBottom:10}}>{['unid','kg'].map(t=><TouchableOpacity key={t} style={[styles.typeBtn,{marginRight:8},prodUnitType===t&&{backgroundColor:'#007bff'}]} onPress={()=>setProdUnitType(t)}><Text style={{color:prodUnitType===t?'#fff':'#333',fontWeight:'bold'}}>{t==='kg'?'⚖ Peso (kg)':'📦 Unidad'}</Text></TouchableOpacity>)}</View>
               <TouchableOpacity style={[styles.typeBtn,{marginBottom:10,backgroundColor:prodRequiresExpiration?'#ffc107':'#6c757d'}]} onPress={()=>{const next=!prodRequiresExpiration;setProdRequiresExpiration(next);if(!next)setProdExpirationDate('');}}><Text style={{color:'#fff',fontWeight:'bold'}}>{prodRequiresExpiration?'📅 Requiere vencimiento':'✓ Producto sin vencimiento'}</Text></TouchableOpacity>
-              {prodRequiresExpiration && <><Text style={{fontSize:12,fontWeight:'bold',color:'#555'}}>Vencimiento (DD-MM-AAAA)</Text><TextInput style={styles.inputHighlight} placeholder="Ej: 31-10-2027" value={prodExpirationDate} onChangeText={setProdExpirationDate} keyboardType="numbers-and-punctuation" /></>}
+              {prodRequiresExpiration && <>
+                <Text style={{fontSize:12,fontWeight:'bold',color:'#555'}}>Vencimiento (DD-MM-AAAA)</Text>
+                <TextInput
+                  style={styles.inputHighlight}
+                  placeholder="Ej: 31-10-2027"
+                  value={prodExpirationDate}
+                  maxLength={10}
+                  onChangeText={(value) => {
+                    const digits=value.replace(/\D/g,'').slice(0,8);
+                    let formatted=digits;
+                    if(digits.length>4) formatted=digits.slice(0,2)+'-'+digits.slice(2,4)+'-'+digits.slice(4);
+                    else if(digits.length>2) formatted=digits.slice(0,2)+'-'+digits.slice(2);
+                    setProdExpirationDate(formatted);
+                  }}
+                  keyboardType="number-pad"
+                />
+                <Text style={{fontSize:11,color:'#777',marginBottom:8}}>Solo numeros. El sistema valida la fecha al guardar.</Text>
+              </>}
               <TouchableOpacity style={[styles.buttonSuccess,{marginTop:12}]} onPress={handleSaveIngressV2} disabled={loading}><Text style={styles.buttonText}>💾 Registrar ingreso y lote</Text></TouchableOpacity>
               <TouchableOpacity style={[styles.buttonPrimary,{backgroundColor:'#6c757d'}]} onPress={resetIngressForm}><Text style={styles.buttonText}>Limpiar formulario</Text></TouchableOpacity>
             </View>
