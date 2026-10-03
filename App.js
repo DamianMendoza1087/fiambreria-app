@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProfitability, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled, actOnAlert, fetchAlertHistory, updateReplenishmentPolicy } from './api';
+import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProfitability, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, updateIngress, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled, actOnAlert, fetchAlertHistory, updateReplenishmentPolicy } from './api';
 
 export default function App() {
   const formatMoney = (value) => {
@@ -123,6 +123,15 @@ export default function App() {
   const [kpiData, setKpiData] = useState(null);
   const [kpiPeriod, setKpiPeriod] = useState('month');
   const [profitabilityData, setProfitabilityData] = useState(null);
+  const [ingressHistory, setIngressHistory] = useState([]);
+  const [editingIngress, setEditingIngress] = useState(null);
+  const [editIngressQty, setEditIngressQty] = useState("");
+  const [editIngressCost, setEditIngressCost] = useState("");
+  const [editIngressSupplier, setEditIngressSupplier] = useState("");
+  const [editIngressLot, setEditIngressLot] = useState("");
+  const [editIngressExpiration, setEditIngressExpiration] = useState("");
+  const [editIngressReason, setEditIngressReason] = useState("");
+
 
   const loadInitialData = async () => {
     try {
@@ -374,6 +383,62 @@ export default function App() {
     setProdBarcode(''); setProdExpirationDate(''); setProdLotNumber(''); setProdRequiresExpiration(true);
     setIngressSearch(''); setIngressMatches([]);
   };
+
+  const loadIngressHistory = async () => {
+    try {
+      setLoading(true);
+      setIngressHistory(await fetchIngresses());
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const beginIngressCorrection = (item) => {
+    setEditingIngress(item);
+    setEditIngressQty(String(item.quantity ?? ""));
+    setEditIngressCost(String(item.cost_price ?? ""));
+    setEditIngressSupplier(item.supplier || "");
+    setEditIngressLot(item.lot_number || "");
+    setEditIngressExpiration(item.expiration_date || "");
+    setEditIngressReason("");
+  };
+
+  const saveIngressCorrection = async () => {
+    if (!editingIngress) return;
+    if (!editIngressReason.trim()) return alert("El motivo de la correccion es obligatorio.");
+
+    const qty = parseFloat(String(editIngressQty).replace(",", "."));
+    const cost = parseFloat(String(editIngressCost).replace(",", "."));
+
+    if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(cost) || cost < 0) {
+      return alert("Cantidad o costo invalido.");
+    }
+
+    try {
+      setLoading(true);
+      await updateIngress(editingIngress.id, {
+        quantity: qty,
+        cost_price: cost,
+        supplier: editIngressSupplier.trim() || null,
+        lot_number: editIngressLot.trim() || null,
+        expiration_date: editIngressExpiration.trim() || null,
+        actor: email,
+        reason: editIngressReason.trim()
+      });
+      alert("Ingreso corregido y auditado.");
+      setEditingIngress(null);
+      setEditIngressReason("");
+      await loadIngressHistory();
+      await loadInitialData();
+    } catch (e) {
+      alert("Error: " + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSaveIngressV2 = async () => {
     const qty=parseFloat((prodStock || '').replace(',','.')), cost=parseFloat((prodCost || '').replace(',','.')), price=parseFloat((prodPrice || '').replace(',','.'));
     if (!prodName.trim() || !Number.isFinite(qty) || qty<=0 || !Number.isFinite(cost) || cost<0 || !Number.isFinite(price)) return alert('Completa producto, costo, PVP y cantidad.');
@@ -1238,6 +1303,45 @@ return (
               <TouchableOpacity style={[styles.buttonSuccess,{marginTop:12}]} onPress={handleSaveIngressV2} disabled={loading}><Text style={styles.buttonText}>💾 Registrar ingreso y lote</Text></TouchableOpacity>
               <TouchableOpacity style={[styles.buttonPrimary,{backgroundColor:'#6c757d'}]} onPress={resetIngressForm}><Text style={styles.buttonText}>Limpiar formulario</Text></TouchableOpacity>
             </View>
+
+            {userRole === 'superadmin' && (
+              <View style={styles.card}>
+                <Text style={styles.subSectionTitle}>Correccion auditada de ingresos</Text>
+                <Text style={{fontSize:11,color:'#666',marginBottom:8}}>Solo SuperAdmin. Toda correccion requiere un motivo.</Text>
+                <TouchableOpacity style={styles.buttonPrimary} onPress={loadIngressHistory} disabled={loading}>
+                  <Text style={styles.buttonText}>Cargar ingresos anteriores</Text>
+                </TouchableOpacity>
+                {ingressHistory.slice(0, 30).map(item => (
+                  <View key={item.id} style={{paddingVertical:9,borderBottomWidth:1,borderBottomColor:'#ddd'}}>
+                    <Text style={{fontWeight:'bold'}}>Ingreso #{item.id} - Producto #{item.product_id}</Text>
+                    <Text style={{fontSize:12}}>Cantidad: {item.quantity} - Costo: {item.cost_price}</Text>
+                    <Text style={{fontSize:11,color:'#666'}}>Proveedor: {item.supplier || '-'} - Lote: {item.lot_number || '-'}</Text>
+                    <Text style={{fontSize:11,color:'#666'}}>Vencimiento: {item.expiration_date || 'Sin vencimiento'}</Text>
+                    <TouchableOpacity style={[styles.typeBtn,{marginTop:5,alignSelf:'flex-start'}]} onPress={() => beginIngressCorrection(item)}>
+                      <Text>Corregir</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {userRole === 'superadmin' && editingIngress && (
+              <View style={styles.card}>
+                <Text style={styles.subSectionTitle}>Corrigiendo ingreso #{editingIngress.id}</Text>
+                <TextInput style={styles.input} placeholder="Cantidad" keyboardType="decimal-pad" value={editIngressQty} onChangeText={setEditIngressQty}/>
+                <TextInput style={styles.input} placeholder="Costo" keyboardType="decimal-pad" value={editIngressCost} onChangeText={setEditIngressCost}/>
+                <TextInput style={styles.input} placeholder="Proveedor" value={editIngressSupplier} onChangeText={setEditIngressSupplier}/>
+                <TextInput style={styles.input} placeholder="Numero de lote" value={editIngressLot} onChangeText={setEditIngressLot}/>
+                <TextInput style={styles.input} placeholder="Vencimiento DD-MM-AAAA" value={editIngressExpiration} onChangeText={setEditIngressExpiration} keyboardType="numbers-and-punctuation"/>
+                <TextInput style={styles.inputHighlight} placeholder="Motivo obligatorio de la correccion" value={editIngressReason} onChangeText={setEditIngressReason}/>
+                <TouchableOpacity style={styles.buttonSuccess} onPress={saveIngressCorrection} disabled={loading}>
+                  <Text style={styles.buttonText}>Guardar correccion auditada</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.buttonPrimary,{backgroundColor:'#6c757d'}]} onPress={() => setEditingIngress(null)}>
+                  <Text style={styles.buttonText}>Cancelar</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </ScrollView>
         )}
 

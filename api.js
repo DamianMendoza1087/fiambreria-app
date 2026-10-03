@@ -219,6 +219,19 @@ export const fetchIngresses = async (productId=null) => {
   if (!res.ok) throw new Error("Error consultando ingresos");
   return await res.json();
 };
+export const updateIngress = async (ingressId, data) => {
+  const res = await fetch(`${API_URL}/ingresses/${ingressId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Error corrigiendo ingreso");
+  }
+  return await res.json();
+};
+
 
 export const createCashMovement = async (data) => {
   const res = await fetch(`${API_URL}/cash/movements`, {
