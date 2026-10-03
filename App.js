@@ -10,6 +10,10 @@ export default function App() {
   };
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userRole, setUserRole] = useState('');
+  const [branchId, setBranchId] = useState(null);
+  const [branchSelectorPending, setBranchSelectorPending] = useState(false);
+
+  const branchName = branchId === 2 ? 'Feria Damyale' : 'Fiambrería Local';
   
   // Permisos dinámicos por módulo y edición
   const [isAccountActive, setIsAccountActive] = useState(false);
@@ -143,9 +147,10 @@ export default function App() {
         setEmpCompare2(users[1].email);
       }
       setPendingPreSales(await fetchPendingPreSales());
-      const cs=await fetchCashSessionStatus();
+      const activeBranch = branchId || 1;
+      const cs=await fetchCashSessionStatus(activeBranch);
       setCashStatus(cs);
-      if (cs.is_open && cs.session_id) setCashMovements(await fetchCashMovements(cs.session_id));
+      if (cs.is_open && cs.session_id) setCashMovements(await fetchCashMovements(cs.session_id, activeBranch));
       else setCashMovements([]);
       setSystemAlerts(await fetchSystemAlerts());
       setActiveHRShifts(await fetchActiveHRShifts());
@@ -175,7 +180,7 @@ export default function App() {
     loadInitialData();
     const interval = setInterval(() => { loadInitialData(); }, 5000);
     return () => clearInterval(interval);
-  }, [isLoggedIn]);
+  }, [isLoggedIn, branchId]);
 
   const handleTabChange = async (tabName) => {
     setCurrentTab(tabName);
@@ -306,13 +311,36 @@ export default function App() {
       setCanIngreso(res.can_ingreso); setCanAlertas(res.can_alertas); setCanRRHH(res.can_rrhh);
       setCanMRP(res.can_mrp); setCanVerificacion(res.can_verificacion); setCanKPIs(res.can_kpis);
       setCanEditRecords(res.can_edit_records);
-      await loadInitialData();
+
+      if ((res.role || 'vendedor') === 'superadmin') {
+        setBranchId(null);
+        setBranchSelectorPending(true);
+      } else {
+        setBranchId(1);
+        setBranchSelectorPending(false);
+      }
     } catch (e) { alert('Error: ' + e.message); }
     finally { setLoading(false); }
   };
 
   const handleLogout = () => {
     setIsLoggedIn(false); setEmail(''); setPassword(''); setUserRole('');
+    setBranchId(null); setBranchSelectorPending(false);
+  };
+
+  const selectBranch = async (id) => {
+    setBranchId(id);
+    setBranchSelectorPending(false);
+    setCurrentTab('preventa');
+    setVendorCart([]);
+    setCashierCart([]);
+    setSelectedPreSaleId(null);
+    setCashMovements([]);
+  };
+
+  const changeBranch = () => {
+    if (userRole !== 'superadmin') return;
+    setBranchSelectorPending(true);
   };
 
   const handleOpenCash = async () => {
@@ -320,7 +348,7 @@ export default function App() {
     try {
       setLoading(true);
       const val = parseFloat(initialCashInput.replace(',', '.'));
-      await openCashSession(val, email);
+      await openCashSession(val, email, branchId || 1);
       alert('✅ Caja abierta correctamente.'); setInitialCashInput('');
       await loadInitialData();
     } catch (e) { alert('Error al abrir caja'); }
@@ -332,7 +360,7 @@ export default function App() {
     try {
       setLoading(true);
       const val = parseFloat(closeCashInput.replace(',', '.'));
-      const res = await closeCashSession(val, email, closeAttempt);
+      const res = await closeCashSession(val, email, closeAttempt, branchId || 1);
 
       if (res.status === 'mismatch_first_attempt') {
         alert(res.message); setCloseAttempt(2); setCloseCashInput('');
@@ -388,7 +416,7 @@ export default function App() {
   const loadIngressHistory = async () => {
     try {
       setLoading(true);
-      setIngressHistory(await fetchIngresses());
+      setIngressHistory(await fetchIngresses(null, branchId || 1));
     } catch (e) {
       alert(e.message);
     } finally {
@@ -456,7 +484,7 @@ export default function App() {
         const created=await createProductMaster({name:prodName.trim(),category:prodCategory||'Varios',brand:prodBrand||null,barcode:prodBarcode.trim()||null,price_per_unit:price,unit_type:prodUnitType,requires_expiration:prodRequiresExpiration,replenishment_policy:'MRP',is_active:true});
         productId=created.id;
       }
-      await createIngress({product_id:productId,supplier:prodSupplier||null,cost_price:cost,quantity:qty,lot_number:prodLotNumber||null,expiration_date:prodRequiresExpiration?prodExpirationDate:null,received_by:email,notes:'Ingreso desde App V2'});
+      await createIngress({product_id:productId,supplier:prodSupplier||null,cost_price:cost,quantity:qty,lot_number:prodLotNumber||null,expiration_date:prodRequiresExpiration?prodExpirationDate:null,received_by:email,notes:'Ingreso desde App V2'}, branchId || 1);
       alert('Ingreso y lote registrados correctamente'); resetIngressForm(); await loadInitialData();
     } catch(e) { alert('Error: '+e.message); } finally { setLoading(false); }
   };
@@ -483,7 +511,7 @@ export default function App() {
 
   const handleSelectProductForAudit = async (prod) => {
     setSelectedAuditProd(prod);
-    try { setSelectedProdLots(await fetchProductLots(prod.id)); }
+    try { setSelectedProdLots(await fetchProductLots(prod.id, branchId || 1)); }
     catch (e) { setSelectedProdLots([]); }
   };
 
@@ -670,7 +698,7 @@ export default function App() {
         amount_mp: mp,
         payment_method: paymentMethod,
         sold_by: email
-      });
+      }, branchId || 1);
       alert(`💳 Venta procesada con éxito!\nVuelto: ${formatMoney(getChangeDue())}`);
       setSelectedPreSaleId(null); setCashierCart([]); setAmountMP(''); setCashTendered('');
       await loadInitialData();
@@ -684,7 +712,7 @@ export default function App() {
     if (!Number.isFinite(amount) || amount<=0 || !cashMovementConcept.trim()) return alert('Ingresá monto y concepto.');
     try {
       setLoading(true);
-      await createCashMovement({movement_type:'OUT',category:cashMovementCategory,amount,concept:cashMovementConcept.trim(),actor:email,supplier:cashMovementSupplier||null,employee_email:cashMovementEmployee||null,notes:'Caja chica App V2'});
+      await createCashMovement({movement_type:'OUT',category:cashMovementCategory,amount,concept:cashMovementConcept.trim(),actor:email,supplier:cashMovementSupplier||null,employee_email:cashMovementEmployee||null,notes:'Caja chica App V2'}, branchId || 1);
       setCashMovementAmount(''); setCashMovementConcept(''); setCashMovementSupplier(''); setCashMovementEmployee('');
       alert('Egreso registrado correctamente'); await loadInitialData();
     } catch(e) { alert('Error: '+e.message); } finally { setLoading(false); }
@@ -692,7 +720,7 @@ export default function App() {
 
   const selectLossProduct = async (p) => {
     setLossProductId(p.id); setLossSearch(p.name); setLossLotId(null);
-    try { setLossLots(await fetchProductLots(p.id)); } catch(e) { setLossLots([]); }
+    try { setLossLots(await fetchProductLots(p.id, branchId || 1)); } catch(e) { setLossLots([]); }
   };
 
   const handleStockLoss = async () => {
@@ -700,7 +728,7 @@ export default function App() {
     if (!lossProductId || !Number.isFinite(qty) || qty<=0) return alert('Seleccioná producto e ingresá una cantidad válida.');
     try {
       setLoading(true);
-      const res=await createStockLoss({product_id:lossProductId,quantity:qty,reason:lossReason,actor:email,lot_id:lossLotId});
+      const res=await createStockLoss({product_id:lossProductId,quantity:qty,reason:lossReason,actor:email,lot_id:lossLotId}, branchId || 1);
       alert(`Merma registrada. Pérdida económica: ${formatMoney(res.economic_loss)}`);
       setLossProductId(null); setLossSearch(''); setLossQty(''); setLossLotId(null); setLossLots([]);
       await loadInitialData();
@@ -805,6 +833,41 @@ export default function App() {
     );
   }
 
+  if (branchSelectorPending && userRole === 'superadmin') {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.branchSelectScreen}>
+          <Text style={styles.branchSelectTitle}>¿Dónde querés trabajar?</Text>
+          <Text style={styles.branchSelectSubtitle}>
+            Elegí la sucursal. Podés cambiarla después sin cerrar sesión.
+          </Text>
+
+          <TouchableOpacity
+            style={[styles.branchBigButton, styles.branchLocalButton]}
+            onPress={() => selectBranch(1)}
+          >
+            <Text style={styles.branchBigIcon}>🍖</Text>
+            <Text style={styles.branchBigTitle}>Fiambrería Local</Text>
+            <Text style={styles.branchBigSubtitle}>Sucursal principal</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.branchBigButton, styles.branchFairButton]}
+            onPress={() => selectBranch(2)}
+          >
+            <Text style={styles.branchBigIcon}>🎪</Text>
+            <Text style={styles.branchBigTitle}>Feria Damyale</Text>
+            <Text style={styles.branchBigSubtitle}>Puesto de feria</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={handleLogout} style={{marginTop:20}}>
+            <Text style={{color:'#dc3545',fontWeight:'bold'}}>🚪 Cerrar sesión</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   if (!isAccountActive && userRole !== 'superadmin') {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -831,8 +894,18 @@ return (
         <View>
           <Text style={styles.headerTitle}>🍖 Fiambrería POS & MRP</Text>
           <Text style={{ color: '#ccc', fontSize: 11 }}>Usuario: {email} ({userRole.toUpperCase()})</Text>
+          <Text style={styles.branchHeader}>📍 {branchName}</Text>
         </View>
-        <TouchableOpacity onPress={handleLogout}><Text style={{ color: '#dc3545', fontWeight: 'bold' }}>🚪 Salir</Text></TouchableOpacity>
+        <View style={{alignItems:'flex-end'}}>
+          {userRole === 'superadmin' && (
+            <TouchableOpacity onPress={changeBranch} style={styles.changeBranchBtn}>
+              <Text style={styles.changeBranchText}>⇄ Cambiar sucursal</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity onPress={handleLogout}>
+            <Text style={{ color: '#dc3545', fontWeight: 'bold', marginTop:6 }}>🚪 Salir</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={styles.body}>
@@ -1601,6 +1674,18 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#1a1a1a', paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight || 25 : 0 },
   header: { backgroundColor: '#1a1a1a', padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   headerTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  branchHeader: { color:'#7CFC98', fontSize:13, fontWeight:'bold', marginTop:4 },
+  changeBranchBtn: { backgroundColor:'#343a40', paddingHorizontal:10, paddingVertical:6, borderRadius:7 },
+  changeBranchText: { color:'#fff', fontSize:11, fontWeight:'bold' },
+  branchSelectScreen: { flex:1, backgroundColor:'#f4f6f8', padding:24, justifyContent:'center', alignItems:'stretch' },
+  branchSelectTitle: { fontSize:28, fontWeight:'bold', textAlign:'center', marginBottom:8, color:'#222' },
+  branchSelectSubtitle: { fontSize:15, textAlign:'center', color:'#666', marginBottom:28 },
+  branchBigButton: { padding:24, borderRadius:16, marginBottom:16, alignItems:'center', elevation:3 },
+  branchLocalButton: { backgroundColor:'#28a745' },
+  branchFairButton: { backgroundColor:'#6f42c1' },
+  branchBigIcon: { fontSize:38, marginBottom:6 },
+  branchBigTitle: { color:'#fff', fontSize:22, fontWeight:'bold' },
+  branchBigSubtitle: { color:'#fff', fontSize:13, marginTop:3 },
   body: { flex: 1, backgroundColor: '#f4f6f8' },
   scrollPadding: { padding: 15, paddingBottom: 40 },
   sectionTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 10 },

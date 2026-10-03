@@ -103,8 +103,8 @@ export const deletePreSale = async (presaleId) => {
   return await res.json();
 };
 
-export const finalizeSale = async (saleData) => {
-  const res = await fetch(`${API_URL}/sales/finalize`, {
+export const finalizeSale = async (saleData, branchId = 1) => {
+  const res = await fetch(`${API_URL}/sales/finalize?branch_id=${branchId}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(saleData),
@@ -113,14 +113,14 @@ export const finalizeSale = async (saleData) => {
   return await res.json();
 };
 
-export const fetchCashSessionStatus = async () => {
-  const res = await fetch(`${API_URL}/cash/status`);
+export const fetchCashSessionStatus = async (branchId = 1) => {
+  const res = await fetch(`${API_URL}/cash/status?branch_id=${branchId}`);
   if (!res.ok) throw new Error("Error al consultar estado de caja");
   return await res.json();
 };
 
-export const openCashSession = async (initialAmount, openedBy) => {
-  const res = await fetch(`${API_URL}/cash/open`, {
+export const openCashSession = async (initialAmount, openedBy, branchId = 1) => {
+  const res = await fetch(`${API_URL}/cash/open?branch_id=${branchId}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ initial_amount: initialAmount, opened_by: openedBy }),
@@ -129,8 +129,8 @@ export const openCashSession = async (initialAmount, openedBy) => {
   return await res.json();
 };
 
-export const closeCashSession = async (reportedCash, closedBy, attemptNumber) => {
-  const res = await fetch(`${API_URL}/cash/close`, {
+export const closeCashSession = async (reportedCash, closedBy, attemptNumber, branchId = 1) => {
+  const res = await fetch(`${API_URL}/cash/close?branch_id=${branchId}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ reported_cash: reportedCash, closed_by: closedBy, attempt_number: attemptNumber }),
@@ -175,8 +175,8 @@ export const fetchSystemAlerts = async () => {
   return await res.json();
 };
 
-export const fetchProductLots = async (productId) => {
-  const res = await fetch(`${API_URL}/products/${productId}/lots`);
+export const fetchProductLots = async (productId, branchId = 1) => {
+  const res = await fetch(`${API_URL}/products/${productId}/lots?branch_id=${branchId}`);
   if (!res.ok) throw new Error("Error al consultar lotes del producto");
   return await res.json();
 };
@@ -208,14 +208,16 @@ export const createProductMaster = async (data) => {
   if (!res.ok) throw new Error((await res.json().catch(()=>({}))).detail || "Error creando producto");
   return await res.json();
 };
-export const createIngress = async (data) => {
-  const res = await fetch(`${API_URL}/ingresses`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});
+export const createIngress = async (data, branchId = 1) => {
+  const res = await fetch(`${API_URL}/ingresses?branch_id=${branchId}`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});
   if (!res.ok) throw new Error((await res.json().catch(()=>({}))).detail || "Error registrando ingreso");
   return await res.json();
 };
-export const fetchIngresses = async (productId=null) => {
-  const q=productId ? `?product_id=${productId}` : "";
-  const res=await fetch(`${API_URL}/ingresses${q}`);
+export const fetchIngresses = async (productId=null, branchId=1) => {
+  const q = new URLSearchParams();
+  q.set("branch_id", String(branchId));
+  if (productId) q.set("product_id", String(productId));
+  const res=await fetch(`${API_URL}/ingresses?${q.toString()}`);
   if (!res.ok) throw new Error("Error consultando ingresos");
   return await res.json();
 };
@@ -233,8 +235,8 @@ export const updateIngress = async (ingressId, data) => {
 };
 
 
-export const createCashMovement = async (data) => {
-  const res = await fetch(`${API_URL}/cash/movements`, {
+export const createCashMovement = async (data, branchId = 1) => {
+  const res = await fetch(`${API_URL}/cash/movements?branch_id=${branchId}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data)
@@ -246,15 +248,17 @@ export const createCashMovement = async (data) => {
   return await res.json();
 };
 
-export const fetchCashMovements = async (sessionId = null) => {
-  const q = sessionId ? `?session_id=${sessionId}` : "";
-  const res = await fetch(`${API_URL}/cash/movements${q}`);
+export const fetchCashMovements = async (sessionId = null, branchId = 1) => {
+  const q = new URLSearchParams();
+  q.set("branch_id", String(branchId));
+  if (sessionId) q.set("session_id", String(sessionId));
+  const res = await fetch(`${API_URL}/cash/movements?${q.toString()}`);
   if (!res.ok) throw new Error("Error consultando movimientos de caja");
   return await res.json();
 };
 
-export const createStockLoss = async (data) => {
-  const res = await fetch(`${API_URL}/stock/losses`, {
+export const createStockLoss = async (data, branchId = 1) => {
+  const res = await fetch(`${API_URL}/stock/losses?branch_id=${branchId}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data)
