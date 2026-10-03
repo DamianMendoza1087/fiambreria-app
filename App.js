@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProfitability, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, updateIngress, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled, actOnAlert, fetchAlertHistory, updateReplenishmentPolicy , fetchBranchProductsAdmin, configureBranchProduct, removeBranchProduct } from './api';
+import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProfitability, fetchMasterProductByBarcode, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, updateIngress, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled, actOnAlert, fetchAlertHistory, updateReplenishmentPolicy , fetchBranchProductsAdmin, configureBranchProduct, removeBranchProduct } from './api';
 
 export default function App() {
   const loadBranchAdminProducts = async () => {
@@ -459,13 +459,37 @@ export default function App() {
     setProdRequiresExpiration(!!p.requires_expiration); setIngressSearch(''); setIngressMatches([]);
   };
   const lookupIngressEAN = async (code) => {
-    const clean=(code || '').trim(); setProdBarcode(clean);
-    if (!clean) { setIngressProductId(null); return; }
+    const clean=(code || '').trim();
+    setProdBarcode(clean);
+
+    if (!clean) {
+      setIngressProductId(null);
+      return;
+    }
+
     try {
-      const found=await fetchProductByBarcode(clean, branchId || 1);
-      if (found) { selectIngressProduct(found); alert(`Producto reconocido: ${found.name}`); }
-      else { setIngressProductId(null); alert('EAN nuevo. Completa los datos para crear el producto.'); }
-    } catch(e) { alert(e.message); }
+      let found = await fetchProductByBarcode(clean, branchId || 1);
+
+      if (!found) {
+        found = await fetchMasterProductByBarcode(clean);
+
+        if (found) {
+          selectIngressProduct(found);
+          alert(`Producto reconocido: ${found.name}. Se habilitará en ${branchName || 'esta sucursal'} al guardar el ingreso.`);
+          return;
+        }
+      }
+
+      if (found) {
+        selectIngressProduct(found);
+        alert(`Producto reconocido: ${found.name}`);
+      } else {
+        setIngressProductId(null);
+        alert('EAN nuevo. Completa los datos para crear el producto.');
+      }
+    } catch(e) {
+      alert(e.message);
+    }
   };
   const handleIngressSearch = async (q) => {
     setIngressSearch(q);
@@ -548,7 +572,7 @@ export default function App() {
     try {
       setLoading(true); let productId=ingressProductId;
       if (!productId) {
-        const created=await createProductMaster({name:prodName.trim(),category:prodCategory.trim(),brand:prodBrand||null,barcode:prodBarcode.trim()||null,price_per_unit:price,unit_type:prodUnitType,requires_expiration:prodRequiresExpiration,replenishment_policy:'MRP',is_active:true});
+        const created=await createProductMaster({name:prodName.trim(),category:prodCategory.trim(),brand:prodBrand||null,barcode:prodBarcode.trim()||null,price_per_unit:price,unit_type:prodUnitType,requires_expiration:prodRequiresExpiration,replenishment_policy:'MRP',is_active:true}, branchId || 1);
         productId=created.id;
       }
       await createIngress({product_id:productId,supplier:prodSupplier||null,cost_price:cost,quantity:qty,lot_number:prodLotNumber||null,expiration_date:prodRequiresExpiration?prodExpirationDate:null,received_by:email,notes:'Ingreso desde App V2'}, branchId || 1);
@@ -670,7 +694,7 @@ export default function App() {
     if (!canEditRecords && userRole !== 'superadmin') return alert('⚠️ No tenés permiso para eliminar o cancelar registros.');
     try {
       setLoading(true);
-      await deletePreSale(psId);
+      await deletePreSale(psId, branchId || 1);
       alert(`🗑 Pre-venta #${psId} cancelada`);
       if (selectedPreSaleId === psId) { setSelectedPreSaleId(null); setCashierCart([]); }
       await loadInitialData();

@@ -97,8 +97,8 @@ export const fetchPendingPreSales = async (branchId = 1) => {
   return await res.json();
 };
 
-export const deletePreSale = async (presaleId) => {
-  const res = await fetch(`${API_URL}/presales/${presaleId}`, { method: "DELETE" });
+export const deletePreSale = async (presaleId, branchId = 1) => {
+  const res = await fetch(`${API_URL}/presales/${presaleId}?branch_id=${branchId}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Error al cancelar pre-venta");
   return await res.json();
 };
@@ -192,6 +192,15 @@ export const fetchProfitability = async (period = "month") => {
   return await res.json();
 };
 
+export const fetchMasterProductByBarcode = async (barcode) => {
+  const res = await fetch(
+    `${API_URL}/products/master/by-barcode/${encodeURIComponent(barcode)}`
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("Error buscando EAN maestro");
+  return await res.json();
+};
+
 export const fetchProductByBarcode = async (barcode, branchId = 1) => {
   const res = await fetch(`${API_URL}/products/by-barcode/${encodeURIComponent(barcode)}?branch_id=${branchId}`);
   if (res.status === 404) return null;
@@ -203,8 +212,8 @@ export const searchProducts = async (q, branchId = 1) => {
   if (!res.ok) throw new Error("Error buscando productos");
   return await res.json();
 };
-export const createProductMaster = async (data) => {
-  const res = await fetch(`${API_URL}/products/master`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});
+export const createProductMaster = async (data, branchId = 1) => {
+  const res = await fetch(`${API_URL}/products/master?branch_id=${branchId}`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});
   if (!res.ok) throw new Error((await res.json().catch(()=>({}))).detail || "Error creando producto");
   return await res.json();
 };
