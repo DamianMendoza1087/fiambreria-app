@@ -214,3 +214,36 @@ export const fetchIngresses = async (productId=null) => {
   if (!res.ok) throw new Error("Error consultando ingresos");
   return await res.json();
 };
+
+export const createCashMovement = async (data) => {
+  const res = await fetch(`${API_URL}/cash/movements`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Error registrando movimiento");
+  }
+  return await res.json();
+};
+
+export const fetchCashMovements = async (sessionId = null) => {
+  const q = sessionId ? `?session_id=${sessionId}` : "";
+  const res = await fetch(`${API_URL}/cash/movements${q}`);
+  if (!res.ok) throw new Error("Error consultando movimientos de caja");
+  return await res.json();
+};
+
+export const createStockLoss = async (data) => {
+  const res = await fetch(`${API_URL}/stock/losses`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Error registrando merma");
+  }
+  return await res.json();
+};

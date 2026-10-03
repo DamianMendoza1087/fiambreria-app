@@ -1,9 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses } from './api';
+import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, createCashMovement, fetchCashMovements, createStockLoss } from './api';
 
 export default function App() {
+  const formatMoney = (value) => {
+    const n=Number(value || 0);
+    return '$'+n.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  };
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userRole, setUserRole] = useState('');
   
@@ -78,6 +82,18 @@ export default function App() {
   const [closeCashInput, setCloseCashInput] = useState('');
   const [closeAttempt, setCloseAttempt] = useState(1);
   const [showCloseModal, setShowCloseModal] = useState(false);
+  const [cashMovements, setCashMovements] = useState([]);
+  const [cashMovementCategory, setCashMovementCategory] = useState('OPERATIVO');
+  const [cashMovementAmount, setCashMovementAmount] = useState('');
+  const [cashMovementConcept, setCashMovementConcept] = useState('');
+  const [cashMovementSupplier, setCashMovementSupplier] = useState('');
+  const [cashMovementEmployee, setCashMovementEmployee] = useState('');
+  const [lossProductId, setLossProductId] = useState(null);
+  const [lossSearch, setLossSearch] = useState('');
+  const [lossQty, setLossQty] = useState('');
+  const [lossReason, setLossReason] = useState('MERMA_CORTE');
+  const [lossLotId, setLossLotId] = useState(null);
+  const [lossLots, setLossLots] = useState([]);
 
   // VERIFICACIÓN & RRHH
   const [selectedAuditDate, setSelectedAuditDate] = useState(new Date().toISOString().split('T')[0]);
@@ -109,7 +125,10 @@ export default function App() {
         setEmpCompare2(users[1].email);
       }
       setPendingPreSales(await fetchPendingPreSales());
-      setCashStatus(await fetchCashSessionStatus());
+      const cs=await fetchCashSessionStatus();
+      setCashStatus(cs);
+      if (cs.is_open && cs.session_id) setCashMovements(await fetchCashMovements(cs.session_id));
+      else setCashMovements([]);
       setSystemAlerts(await fetchSystemAlerts());
 
       const currentUser = users.find(u => u.email === email);
@@ -507,11 +526,40 @@ export default function App() {
         payment_method: paymentMethod,
         sold_by: email
       });
-      alert(`💳 Venta procesada con éxito!\nVuelto: $${getChangeDue()}`);
+      alert(`💳 Venta procesada con éxito!\nVuelto: ${formatMoney(getChangeDue())}`);
       setSelectedPreSaleId(null); setCashierCart([]); setAmountMP(''); setCashTendered('');
       await loadInitialData();
     } catch (e) { alert('Error procesando venta'); }
     finally { setLoading(false); }
+  };
+
+  const handleCashMovement = async () => {
+    if (!cashStatus.is_open) return alert('Abrí la caja antes de registrar movimientos.');
+    const amount=parseFloat((cashMovementAmount||'').replace(',','.'));
+    if (!Number.isFinite(amount) || amount<=0 || !cashMovementConcept.trim()) return alert('Ingresá monto y concepto.');
+    try {
+      setLoading(true);
+      await createCashMovement({movement_type:'OUT',category:cashMovementCategory,amount,concept:cashMovementConcept.trim(),actor:email,supplier:cashMovementSupplier||null,employee_email:cashMovementEmployee||null,notes:'Caja chica App V2'});
+      setCashMovementAmount(''); setCashMovementConcept(''); setCashMovementSupplier(''); setCashMovementEmployee('');
+      alert('Egreso registrado correctamente'); await loadInitialData();
+    } catch(e) { alert('Error: '+e.message); } finally { setLoading(false); }
+  };
+
+  const selectLossProduct = async (p) => {
+    setLossProductId(p.id); setLossSearch(p.name); setLossLotId(null);
+    try { setLossLots(await fetchProductLots(p.id)); } catch(e) { setLossLots([]); }
+  };
+
+  const handleStockLoss = async () => {
+    const qty=parseFloat((lossQty||'').replace(',','.'));
+    if (!lossProductId || !Number.isFinite(qty) || qty<=0) return alert('Seleccioná producto e ingresá una cantidad válida.');
+    try {
+      setLoading(true);
+      const res=await createStockLoss({product_id:lossProductId,quantity:qty,reason:lossReason,actor:email,lot_id:lossLotId});
+      alert(`Merma registrada. Pérdida económica: ${formatMoney(res.economic_loss)}`);
+      setLossProductId(null); setLossSearch(''); setLossQty(''); setLossLotId(null); setLossLots([]);
+      await loadInitialData();
+    } catch(e) { alert('Error: '+e.message); } finally { setLoading(false); }
   };
 
   const handleStartEditProduct = (prod) => {
@@ -669,7 +717,7 @@ return (
                   filteredProductsVendor.map(p => (
                     <TouchableOpacity key={p.id} style={styles.dropdownItem} onPress={() => addToVendorCart(p)}>
                       <Text style={{ fontWeight: 'bold' }}>{p.name}</Text>
-                      <Text style={{ color: '#28a745', fontSize: 12 }}>${p.price_per_unit} / {p.unit_type} | Stock: {p.stock} {p.unit_type}</Text>
+                      <Text style={{ color: '#28a745', fontSize: 12 }}>{formatMoney(p.price_per_unit)} / {p.unit_type} | Stock: {p.stock} {p.unit_type}</Text>
                     </TouchableOpacity>
                   ))
                 )}
@@ -696,7 +744,7 @@ return (
                     <Text style={{ fontSize: 11, marginLeft: 4, marginRight: 8, color: '#444' }}>{i.unit_type}</Text>
                   </View>
 
-                  <Text style={{ fontWeight: 'bold' }}>${((i.price_per_unit) * (parseFloat(i.qty) || 0)).toFixed(2)}</Text>
+                  <Text style={{ fontWeight: 'bold' }}>{formatMoney((i.price_per_unit) * (parseFloat(i.qty) || 0))}</Text>
                 </View>
               ))
             )}
@@ -725,7 +773,7 @@ return (
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#d4edda', padding: 12, borderRadius: 8, marginBottom: 15 }}>
                   <View>
                     <Text style={{ fontWeight: 'bold', color: '#155724' }}>🟢 CAJA ABIERTA</Text>
-                    <Text style={{ fontSize: 11, color: '#155724' }}>{cashStatus.opened_by} ({cashStatus.opened_at}) | Fondo: ${cashStatus.initial_amount}</Text>
+                    <Text style={{ fontSize: 11, color: '#155724' }}>{cashStatus.opened_by} ({cashStatus.opened_at}) | Fondo: {formatMoney(cashStatus.initial_amount)}</Text>
                   </View>
                   <TouchableOpacity style={{ backgroundColor: '#dc3545', padding: 8, borderRadius: 6 }} onPress={() => setShowCloseModal(true)}>
                     <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 11 }}>🔒 Arqueo / Cierre</Text>
@@ -747,6 +795,32 @@ return (
                   </View>
                 )}
 
+                <View style={styles.card}>
+                  <Text style={styles.subSectionTitle}>💸 Caja chica / Egresos</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:8}}>
+                    {['PROVEEDOR','SERVICIOS','EMPLEADO','COMPRA_MENOR','OPERATIVO','OTRO','RETIRO_DUENO'].map(c=><TouchableOpacity key={c} style={[styles.typeBtn,{marginRight:6},cashMovementCategory===c&&{backgroundColor:'#dc3545'}]} onPress={()=>setCashMovementCategory(c)}><Text style={{fontSize:11,color:cashMovementCategory===c?'#fff':'#333'}}>{c.replaceAll('_',' ')}</Text></TouchableOpacity>)}
+                  </ScrollView>
+                  <TextInput style={styles.input} placeholder="Concepto / detalle" value={cashMovementConcept} onChangeText={setCashMovementConcept} />
+                  <TextInput style={styles.input} placeholder="Monto ($)" keyboardType="decimal-pad" value={cashMovementAmount} onChangeText={setCashMovementAmount} />
+                  {cashMovementCategory==='PROVEEDOR' && <TextInput style={styles.input} placeholder="Proveedor" value={cashMovementSupplier} onChangeText={setCashMovementSupplier} />}
+                  {cashMovementCategory==='EMPLEADO' && <TextInput style={styles.input} placeholder="Email del empleado" autoCapitalize="none" value={cashMovementEmployee} onChangeText={setCashMovementEmployee} />}
+                  <TouchableOpacity style={styles.buttonDanger} onPress={handleCashMovement} disabled={loading}><Text style={styles.buttonText}>Registrar egreso</Text></TouchableOpacity>
+                  {cashMovements.slice(0,5).map(m=><Text key={m.id} style={{fontSize:11,color:'#555',marginTop:5}}>{m.category}: {m.concept} — {formatMoney(m.amount)}</Text>)}
+                </View>
+
+                <View style={styles.card}>
+                  <Text style={styles.subSectionTitle}>⚠️ Mermas y pérdidas</Text>
+                  <TextInput style={styles.searchInput} placeholder="Buscar producto..." value={lossSearch} onChangeText={(q)=>{setLossSearch(q);setLossProductId(null);}} />
+                  {!lossProductId && lossSearch.trim().length>1 && <View style={styles.dropdownContainer}>{activeProducts.filter(p=>p.name.toLowerCase().includes(lossSearch.toLowerCase())).slice(0,8).map(p=><TouchableOpacity key={p.id} style={styles.dropdownItem} onPress={()=>selectLossProduct(p)}><Text style={{fontWeight:'bold'}}>{p.name}</Text><Text style={{fontSize:11}}>Stock: {p.stock} {p.unit_type}</Text></TouchableOpacity>)}</View>}
+                  {lossProductId && <Text style={{fontSize:12,color:'#28a745',marginBottom:8}}>✓ Producto seleccionado</Text>}
+                  <TextInput style={styles.input} placeholder="Cantidad perdida (admite 0,100)" keyboardType="decimal-pad" value={lossQty} onChangeText={setLossQty} />
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:8}}>
+                    {['MERMA_CORTE','VENCIMIENTO','ROTURA','DIFERENCIA_INVENTARIO','CONSUMO_INTERNO','OTRO'].map(r=><TouchableOpacity key={r} style={[styles.typeBtn,{marginRight:6},lossReason===r&&{backgroundColor:'#ffc107'}]} onPress={()=>setLossReason(r)}><Text style={{fontSize:11,fontWeight:'bold'}}>{r.replaceAll('_',' ')}</Text></TouchableOpacity>)}
+                  </ScrollView>
+                  {lossLots.length>0 && <><Text style={{fontSize:11,fontWeight:'bold'}}>Lote específico (opcional; vacío = FEFO)</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:8}}><TouchableOpacity style={[styles.typeBtn,{marginRight:6},!lossLotId&&{backgroundColor:'#007bff'}]} onPress={()=>setLossLotId(null)}><Text style={{color:!lossLotId?'#fff':'#333'}}>FEFO</Text></TouchableOpacity>{lossLots.map(l=><TouchableOpacity key={l.id} style={[styles.typeBtn,{marginRight:6},lossLotId===l.id&&{backgroundColor:'#007bff'}]} onPress={()=>setLossLotId(l.id)}><Text style={{color:lossLotId===l.id?'#fff':'#333'}}>{l.lot_number} ({l.current_qty})</Text></TouchableOpacity>)}</ScrollView></>}
+                  <TouchableOpacity style={styles.buttonDanger} onPress={handleStockLoss} disabled={loading}><Text style={styles.buttonText}>Registrar merma / pérdida</Text></TouchableOpacity>
+                </View>
+
                 <Text style={styles.subSectionTitle}>Pre-ventas Pendientes:</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 15 }}>
                   {pendingPreSales.length === 0 ? <Text style={styles.emptyText}>Sin pre-ventas pendientes.</Text> : (
@@ -756,7 +830,7 @@ return (
                           <Text style={{ fontWeight: 'bold', color: selectedPreSaleId === ps.id ? '#fff' : '#007bff' }}>
                             Ticket #{ps.id} ({ps.created_at})
                           </Text>
-                          <Text style={{ color: selectedPreSaleId === ps.id ? '#fff' : '#333' }}>${ps.total.toFixed(2)}</Text>
+                          <Text style={{ color: selectedPreSaleId === ps.id ? '#fff' : '#333' }}>{formatMoney(ps.total)}</Text>
                         </TouchableOpacity>
 
                         {(canEditRecords || userRole === 'superadmin') && (
@@ -787,7 +861,7 @@ return (
                     {filteredProductsCashier.map(p => (
                       <TouchableOpacity key={p.id} style={styles.dropdownItem} onPress={() => addToCashierCart(p)}>
                         <Text style={{ fontWeight: 'bold' }}>{p.name}</Text>
-                        <Text style={{ color: '#28a745', fontSize: 12 }}>${p.price_per_unit} / {p.unit_type} | Stock: {p.stock} {p.unit_type}</Text>
+                        <Text style={{ color: '#28a745', fontSize: 12 }}>{formatMoney(p.price_per_unit)} / {p.unit_type} | Stock: {p.stock} {p.unit_type}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>
@@ -803,7 +877,7 @@ return (
                       <TouchableOpacity style={styles.qtyBtn} onPress={() => updateCashierCartQty(i.id, 1)}><Text style={{ color: '#fff', fontWeight: 'bold' }}>+</Text></TouchableOpacity>
                       <Text style={{ fontSize: 11, marginLeft: 4, marginRight: 8 }}>{i.unit_type}</Text>
                     </View>
-                    <Text style={{ fontWeight: 'bold' }}>${((i.price_per_unit) * (parseFloat(i.qty) || 0)).toFixed(2)}</Text>
+                    <Text style={{ fontWeight: 'bold' }}>{formatMoney((i.price_per_unit) * (parseFloat(i.qty) || 0))}</Text>
                   </View>
                 ))}
 
