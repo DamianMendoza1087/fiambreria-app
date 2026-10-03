@@ -71,8 +71,8 @@ export const updateUserPermissions = async (userId, permissions) => {
   return await res.json();
 };
 
-export const submitStockAudit = async (productId, countedQty, reportedBy) => {
-  const res = await fetch(`${API_URL}/products/${productId}/audit`, {
+export const submitStockAudit = async (productId, countedQty, reportedBy, branchId = 1) => {
+  const res = await fetch(`${API_URL}/products/${productId}/audit?branch_id=${branchId}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ counted_qty: countedQty, reported_by: reportedBy }),
@@ -81,8 +81,8 @@ export const submitStockAudit = async (productId, countedQty, reportedBy) => {
   return await res.json();
 };
 
-export const createPreSale = async (items) => {
-  const res = await fetch(`${API_URL}/presales`, {
+export const createPreSale = async (items, branchId = 1) => {
+  const res = await fetch(`${API_URL}/presales?branch_id=${branchId}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ items }),
@@ -91,8 +91,8 @@ export const createPreSale = async (items) => {
   return await res.json();
 };
 
-export const fetchPendingPreSales = async () => {
-  const res = await fetch(`${API_URL}/presales/pending`);
+export const fetchPendingPreSales = async (branchId = 1) => {
+  const res = await fetch(`${API_URL}/presales/pending?branch_id=${branchId}`);
   if (!res.ok) throw new Error("Error al obtener pre-ventas pendientes");
   return await res.json();
 };

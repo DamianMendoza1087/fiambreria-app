@@ -212,7 +212,7 @@ export default function App() {
         setEmpCompare1(users[0].email);
         setEmpCompare2(users[1].email);
       }
-      setPendingPreSales(await fetchPendingPreSales());
+      setPendingPreSales(await fetchPendingPreSales(branchId || 1));
       const activeBranch = branchId || 1;
       const cs=await fetchCashSessionStatus(activeBranch);
       setCashStatus(cs);
