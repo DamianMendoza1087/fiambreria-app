@@ -186,3 +186,31 @@ export const fetchKPIsDashboard = async () => {
   if (!res.ok) throw new Error("Error al obtener indicadores KPI");
   return await res.json();
 };
+
+export const fetchProductByBarcode = async (barcode) => {
+  const res = await fetch(`${API_URL}/products/by-barcode/${encodeURIComponent(barcode)}`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("Error buscando EAN");
+  return await res.json();
+};
+export const searchProducts = async (q) => {
+  const res = await fetch(`${API_URL}/products/search?q=${encodeURIComponent(q || "")}`);
+  if (!res.ok) throw new Error("Error buscando productos");
+  return await res.json();
+};
+export const createProductMaster = async (data) => {
+  const res = await fetch(`${API_URL}/products/master`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});
+  if (!res.ok) throw new Error((await res.json().catch(()=>({}))).detail || "Error creando producto");
+  return await res.json();
+};
+export const createIngress = async (data) => {
+  const res = await fetch(`${API_URL}/ingresses`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});
+  if (!res.ok) throw new Error((await res.json().catch(()=>({}))).detail || "Error registrando ingreso");
+  return await res.json();
+};
+export const fetchIngresses = async (productId=null) => {
+  const q=productId ? `?product_id=${productId}` : "";
+  const res=await fetch(`${API_URL}/ingresses${q}`);
+  if (!res.ok) throw new Error("Error consultando ingresos");
+  return await res.json();
+};

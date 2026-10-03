@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard } from './api';
+import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses } from './api';
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -50,6 +50,12 @@ export default function App() {
   const [prodBarcode, setProdBarcode] = useState('');
   const [prodExpirationDate, setProdExpirationDate] = useState('');
   const [prodIsActive, setProdIsActive] = useState(true);
+  const [ingressProductId, setIngressProductId] = useState(null);
+  const [prodBrand, setProdBrand] = useState('');
+  const [prodLotNumber, setProdLotNumber] = useState('');
+  const [prodRequiresExpiration, setProdRequiresExpiration] = useState(true);
+  const [ingressSearch, setIngressSearch] = useState('');
+  const [ingressMatches, setIngressMatches] = useState([]);
 
   // Escáner
   const [permission, requestPermission] = useCameraPermissions();
@@ -250,10 +256,51 @@ export default function App() {
     }
   };
 
+  const selectIngressProduct = (p) => {
+    setIngressProductId(p.id); setProdName(p.name || ''); setProdCategory(p.category || 'Varios');
+    setProdBrand(p.brand || ''); setProdPrice(String(p.price_per_unit || '')); setProdSupplier(p.supplier || '');
+    setProdUnitType(p.unit_type || 'unid'); setProdBarcode(p.barcode || '');
+    setProdRequiresExpiration(!!p.requires_expiration); setIngressSearch(''); setIngressMatches([]);
+  };
+  const lookupIngressEAN = async (code) => {
+    const clean=(code || '').trim(); setProdBarcode(clean);
+    if (!clean) { setIngressProductId(null); return; }
+    try {
+      const found=await fetchProductByBarcode(clean);
+      if (found) { selectIngressProduct(found); alert(`Producto reconocido: ${found.name}`); }
+      else { setIngressProductId(null); alert('EAN nuevo. Completa los datos para crear el producto.'); }
+    } catch(e) { alert(e.message); }
+  };
+  const handleIngressSearch = async (q) => {
+    setIngressSearch(q);
+    if (q.trim().length < 2) return setIngressMatches([]);
+    try { setIngressMatches(await searchProducts(q.trim())); } catch(e) { setIngressMatches([]); }
+  };
+  const resetIngressForm = () => {
+    setIngressProductId(null); setProdName(''); setProdCategory('Varios'); setProdBrand('');
+    setProdCost(''); setProdPrice(''); setProdSupplier(''); setProdStock(''); setProdUnitType('unid');
+    setProdBarcode(''); setProdExpirationDate(''); setProdLotNumber(''); setProdRequiresExpiration(true);
+    setIngressSearch(''); setIngressMatches([]);
+  };
+  const handleSaveIngressV2 = async () => {
+    const qty=parseFloat((prodStock || '').replace(',','.')), cost=parseFloat((prodCost || '').replace(',','.')), price=parseFloat((prodPrice || '').replace(',','.'));
+    if (!prodName.trim() || !Number.isFinite(qty) || qty<=0 || !Number.isFinite(cost) || cost<0 || !Number.isFinite(price)) return alert('Completa producto, costo, PVP y cantidad.');
+    if (prodRequiresExpiration && !prodExpirationDate.trim()) return alert('Este producto requiere fecha de vencimiento.');
+    try {
+      setLoading(true); let productId=ingressProductId;
+      if (!productId) {
+        const created=await createProductMaster({name:prodName.trim(),category:prodCategory||'Varios',brand:prodBrand||null,barcode:prodBarcode.trim()||null,price_per_unit:price,unit_type:prodUnitType,requires_expiration:prodRequiresExpiration,replenishment_policy:'MRP',is_active:true});
+        productId=created.id;
+      }
+      await createIngress({product_id:productId,supplier:prodSupplier||null,cost_price:cost,quantity:qty,lot_number:prodLotNumber||null,expiration_date:prodRequiresExpiration?prodExpirationDate:null,received_by:email,notes:'Ingreso desde App V2'});
+      alert('Ingreso y lote registrados correctamente'); resetIngressForm(); await loadInitialData();
+    } catch(e) { alert('Error: '+e.message); } finally { setLoading(false); }
+  };
+
   const handleBarcodeScanned = ({ data }) => {
     setScanned(true); setShowCamera(false);
     if (cameraTarget === 'ingreso') {
-      setProdBarcode(data); alert(`✅ Código EAN capturado: ${data}`);
+      lookupIngressEAN(data);
     } else if (cameraTarget === 'preventa') {
       const found = products.find(p => p.barcode === data && p.is_active);
       if (found) { addToVendorCart(found); alert(`✅ Agregado: ${found.name}`); }
@@ -1004,25 +1051,32 @@ return (
           </ScrollView>
         )}
 
-        {/* INGRESOS */}
+        {/* INGRESOS V2 */}
         {currentTab === 'ingresos' && (canIngreso || userRole === 'superadmin') && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
-            <Text style={styles.sectionTitle}>📥 Ingresos y Vencimientos (FEFO)</Text>
+            <Text style={styles.sectionTitle}>📥 Ingreso de Mercadería</Text>
             <View style={styles.card}>
-              <TextInput style={styles.input} placeholder="Nombre del Producto" value={prodName} onChangeText={setProdName} />
-              <TextInput style={styles.input} placeholder="Categoría" value={prodCategory} onChangeText={setProdCategory} />
-              <TextInput style={styles.input} placeholder="Proveedor (ej: Distribuidora Ale)" value={prodSupplier} onChangeText={setProdSupplier} />
-              <TextInput style={styles.input} placeholder="Costo de Compra de este Lote ($)" keyboardType="numeric" value={prodCost} onChangeText={setProdCost} />
-              
-              <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4 }}>📅 Fecha Vencimiento (DD-MM-AAAA):</Text>
-              <TextInput style={styles.inputHighlight} placeholder="Ej: 31-10-2026" value={prodExpirationDate} onChangeText={setProdExpirationDate} />
-
-              <TextInput style={styles.input} placeholder={`Precio PVP ($)`} keyboardType="numeric" value={prodPrice} onChangeText={setProdPrice} />
-              <TextInput style={styles.input} placeholder={`Cantidad Comprada (${prodUnitType})`} keyboardType="numeric" value={prodStock} onChangeText={setProdStock} />
-
-              <TouchableOpacity style={[styles.buttonPrimary, { marginTop: 15 }]} onPress={handleSaveProduct} disabled={loading}>
-                <Text style={styles.buttonText}>{editingProductId ? '💾 Guardar Cambios' : '+ Guardar Ingreso / Lote'}</Text>
-              </TouchableOpacity>
+              <Text style={styles.subSectionTitle}>1. Identificar producto</Text>
+              <TouchableOpacity style={styles.buttonCamera} onPress={() => toggleCamera('ingreso')}><Text style={styles.buttonText}>{showCamera && cameraTarget==='ingreso' ? '📷 Cerrar Escáner' : '📷 Escanear EAN'}</Text></TouchableOpacity>
+              {showCamera && cameraTarget==='ingreso' && permission?.granted && <View style={styles.cameraContainer}><CameraView style={StyleSheet.absoluteFillObject} facing="back" onBarcodeScanned={scanned ? undefined : handleBarcodeScanned} /></View>}
+              <TextInput style={styles.input} placeholder="EAN (opcional)" value={prodBarcode} onChangeText={setProdBarcode} onEndEditing={() => prodBarcode && lookupIngressEAN(prodBarcode)} keyboardType="numeric" />
+              <TextInput style={styles.searchInput} placeholder="🔍 O buscar producto por nombre..." value={ingressSearch} onChangeText={handleIngressSearch} />
+              {ingressMatches.length>0 && <View style={styles.dropdownContainer}>{ingressMatches.map(p=><TouchableOpacity key={p.id} style={styles.dropdownItem} onPress={()=>selectIngressProduct(p)}><Text style={{fontWeight:'bold'}}>{p.name}</Text><Text style={{fontSize:11,color:'#666'}}>EAN: {p.barcode || 'Sin EAN'} | Stock: {p.stock} {p.unit_type}</Text></TouchableOpacity>)}</View>}
+              <Text style={{fontSize:12,color:ingressProductId?'#28a745':'#666',marginBottom:8}}>{ingressProductId ? `✓ Producto existente #${ingressProductId}` : 'Producto nuevo / sin EAN'}</Text>
+              <TextInput style={styles.input} placeholder="Nombre del producto" value={prodName} onChangeText={setProdName} editable={!ingressProductId} />
+              <TextInput style={styles.input} placeholder="Marca (opcional)" value={prodBrand} onChangeText={setProdBrand} editable={!ingressProductId} />
+              <TextInput style={styles.input} placeholder="Categoría" value={prodCategory} onChangeText={setProdCategory} editable={!ingressProductId} />
+              <Text style={styles.subSectionTitle}>2. Datos del lote / compra</Text>
+              <TextInput style={styles.input} placeholder="Proveedor" value={prodSupplier} onChangeText={setProdSupplier} />
+              <TextInput style={styles.input} placeholder="N° de lote (opcional)" value={prodLotNumber} onChangeText={setProdLotNumber} />
+              <TextInput style={styles.input} placeholder="Costo de compra ($)" keyboardType="decimal-pad" value={prodCost} onChangeText={setProdCost} />
+              <TextInput style={styles.input} placeholder="Precio PVP ($)" keyboardType="decimal-pad" value={prodPrice} onChangeText={setProdPrice} />
+              <TextInput style={styles.input} placeholder={`Cantidad (${prodUnitType})`} keyboardType="decimal-pad" value={prodStock} onChangeText={setProdStock} />
+              <View style={{flexDirection:'row',marginBottom:10}}>{['unid','kg'].map(t=><TouchableOpacity key={t} style={[styles.typeBtn,{marginRight:8},prodUnitType===t&&{backgroundColor:'#007bff'}]} onPress={()=>setProdUnitType(t)}><Text style={{color:prodUnitType===t?'#fff':'#333',fontWeight:'bold'}}>{t==='kg'?'⚖ Peso (kg)':'📦 Unidad'}</Text></TouchableOpacity>)}</View>
+              <TouchableOpacity style={[styles.typeBtn,{marginBottom:10,backgroundColor:prodRequiresExpiration?'#ffc107':'#6c757d'}]} onPress={()=>{const next=!prodRequiresExpiration;setProdRequiresExpiration(next);if(!next)setProdExpirationDate('');}}><Text style={{color:'#fff',fontWeight:'bold'}}>{prodRequiresExpiration?'📅 Requiere vencimiento':'✓ Producto sin vencimiento'}</Text></TouchableOpacity>
+              {prodRequiresExpiration && <><Text style={{fontSize:12,fontWeight:'bold',color:'#555'}}>Vencimiento (DD-MM-AAAA)</Text><TextInput style={styles.inputHighlight} placeholder="Ej: 31-10-2027" value={prodExpirationDate} onChangeText={setProdExpirationDate} keyboardType="numbers-and-punctuation" /></>}
+              <TouchableOpacity style={[styles.buttonSuccess,{marginTop:12}]} onPress={handleSaveIngressV2} disabled={loading}><Text style={styles.buttonText}>💾 Registrar ingreso y lote</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.buttonPrimary,{backgroundColor:'#6c757d'}]} onPress={resetIngressForm}><Text style={styles.buttonText}>Limpiar formulario</Text></TouchableOpacity>
             </View>
           </ScrollView>
         )}
