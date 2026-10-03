@@ -247,3 +247,40 @@ export const createStockLoss = async (data) => {
   }
   return await res.json();
 };
+
+export const startHRShift = async (userId, roleWorked) => {
+  const res = await fetch(`${API_URL}/hr/shifts/start`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:userId,role_worked:roleWorked})});
+  if (!res.ok) throw new Error((await res.json().catch(()=>({}))).detail || "Error iniciando turno");
+  return await res.json();
+};
+export const endHRShift = async (userId) => {
+  const res = await fetch(`${API_URL}/hr/shifts/end`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:userId})});
+  if (!res.ok) throw new Error((await res.json().catch(()=>({}))).detail || "Error cerrando turno");
+  return await res.json();
+};
+export const fetchActiveHRShifts = async () => {
+  const res = await fetch(`${API_URL}/hr/shifts/active`);
+  if (!res.ok) throw new Error("Error consultando turnos activos");
+  return await res.json();
+};
+export const fetchHRWorkLogs = async (email=null, days=30) => {
+  const q = new URLSearchParams();
+  if (email) q.set("email", email);
+  q.set("days", String(days));
+  const res = await fetch(`${API_URL}/hr/worklogs?${q.toString()}`);
+  if (!res.ok) throw new Error("Error consultando fichajes");
+  return await res.json();
+};
+export const compareHR = async (emails=[], days=30) => {
+  const q = new URLSearchParams();
+  if (emails.length) q.set("emails", emails.join(","));
+  q.set("days", String(days));
+  const res = await fetch(`${API_URL}/hr/compare?${q.toString()}`);
+  if (!res.ok) throw new Error("Error comparando empleados");
+  return await res.json();
+};
+export const setUserEnabled = async (userId, isActive) => {
+  const res = await fetch(`${API_URL}/users/${userId}/status`, {method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({is_active:isActive})});
+  if (!res.ok) throw new Error((await res.json().catch(()=>({}))).detail || "Error cambiando estado");
+  return await res.json();
+};

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, createCashMovement, fetchCashMovements, createStockLoss } from './api';
+import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled } from './api';
 
 export default function App() {
   const formatMoney = (value) => {
@@ -107,6 +107,11 @@ export default function App() {
   const [empCompare1, setEmpCompare1] = useState('');
   const [empCompare2, setEmpCompare2] = useState('');
   const [comparisonResult, setComparisonResult] = useState(null);
+  const [activeHRShifts, setActiveHRShifts] = useState([]);
+  const [hrSelectedEmails, setHRSelectedEmails] = useState([]);
+  const [hrDays, setHRDays] = useState('30');
+  const [hrIndividualEmail, setHRIndividualEmail] = useState('');
+  const [hrIndividualLogs, setHRIndividualLogs] = useState([]);
 
   // MRP, ALERTAS Y KPIS
   const [mrpSuggestions, setMrpSuggestions] = useState([]);
@@ -130,6 +135,7 @@ export default function App() {
       if (cs.is_open && cs.session_id) setCashMovements(await fetchCashMovements(cs.session_id));
       else setCashMovements([]);
       setSystemAlerts(await fetchSystemAlerts());
+      setActiveHRShifts(await fetchActiveHRShifts());
 
       const currentUser = users.find(u => u.email === email);
       if (currentUser) {
@@ -190,6 +196,35 @@ export default function App() {
     try { setLoading(true); setKpiData(await fetchKPIsDashboard()); }
     catch (e) { alert('Error cargando KPIs'); }
     finally { setLoading(false); }
+  };
+
+  const refreshHR = async () => {
+    setActiveHRShifts(await fetchActiveHRShifts());
+    if (hrIndividualEmail) setHRIndividualLogs(await fetchHRWorkLogs(hrIndividualEmail, parseInt(hrDays) || 30));
+  };
+  const handleStartShift = async (u) => {
+    try { setLoading(true); await startHRShift(u.id,u.role); await refreshHR(); alert(`Turno iniciado: ${u.name}`); }
+    catch(e) { alert(e.message); } finally { setLoading(false); }
+  };
+  const handleEndShift = async (u) => {
+    try { setLoading(true); await endHRShift(u.id); await refreshHR(); alert(`Turno finalizado: ${u.name}`); }
+    catch(e) { alert(e.message); } finally { setLoading(false); }
+  };
+  const handleUserEnabled = async (u) => {
+    try { setLoading(true); await setUserEnabled(u.id,!u.is_active); await loadInitialData(); }
+    catch(e) { alert(e.message); } finally { setLoading(false); }
+  };
+  const toggleHRCompare = (mail) => setHRSelectedEmails(prev => prev.includes(mail) ? prev.filter(x=>x!==mail) : [...prev,mail]);
+  const handleHRCompareV2 = async (all=false) => {
+    const emails = all ? usersList.filter(u=>u.role!=='superadmin').map(u=>u.email) : hrSelectedEmails;
+    if (!all && emails.length < 2) return alert('Seleccioná al menos 2 empleados.');
+    try { setLoading(true); setComparisonResult(await compareHR(emails, parseInt(hrDays)||30)); }
+    catch(e) { alert(e.message); } finally { setLoading(false); }
+  };
+  const handleIndividualHR = async (mail) => {
+    setHRIndividualEmail(mail);
+    try { setHRIndividualLogs(await fetchHRWorkLogs(mail, parseInt(hrDays)||30)); }
+    catch(e) { alert(e.message); }
   };
 
   const handleCompareEmployees = async () => {
@@ -995,50 +1030,53 @@ return (
             ))}
           </ScrollView>
         )}
-{/* RRHH */}
+{/* RRHH V2 */}
         {currentTab === 'rrhh' && (canRRHH || userRole === 'superadmin') && (
           <ScrollView contentContainerStyle={styles.scrollPadding}>
-            <Text style={styles.sectionTitle}>👨‍💼 RRHH, Fichaje y Rendimiento</Text>
-            <Text style={styles.subSectionTitle}>Habilitación Diaria y Fichaje</Text>
-            {usersList.filter(u => u.role !== 'superadmin').map(u => (
-              <View key={u.id} style={styles.card}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <View>
-                    <Text style={{ fontWeight: 'bold', fontSize: 16 }}>{u.name}</Text>
-                    <Text style={{ color: '#666', fontSize: 12 }}>{u.email}</Text>
+            <Text style={styles.sectionTitle}>👨‍💼 RRHH y Turnos</Text>
+            <View style={styles.card}>
+              <Text style={styles.subSectionTitle}>Turnos laborales (independientes de Caja)</Text>
+              {usersList.filter(u=>u.role!=='superadmin').map(u=>{
+                const shift=activeHRShifts.find(x=>x.user_id===u.id);
+                return <View key={u.id} style={{paddingVertical:10,borderBottomWidth:1,borderBottomColor:'#eee'}}>
+                  <Text style={{fontWeight:'bold'}}>{u.name} · {u.role}</Text>
+                  <Text style={{fontSize:11,color:'#666'}}>{u.email}</Text>
+                  <Text style={{fontSize:11,color:shift?'#28a745':'#777',marginVertical:5}}>{shift ? `🟢 En turno · ${shift.role_worked || u.role}` : '⚪ Fuera de turno'}</Text>
+                  <View style={{flexDirection:'row',flexWrap:'wrap'}}>
+                    {!shift && u.is_active && <TouchableOpacity style={[styles.typeBtn,{backgroundColor:'#28a745',marginRight:6}]} onPress={()=>handleStartShift(u)}><Text style={{color:'#fff',fontWeight:'bold'}}>▶ Iniciar turno</Text></TouchableOpacity>}
+                    {shift && <TouchableOpacity style={[styles.typeBtn,{backgroundColor:'#dc3545',marginRight:6}]} onPress={()=>handleEndShift(u)}><Text style={{color:'#fff',fontWeight:'bold'}}>■ Finalizar turno</Text></TouchableOpacity>}
+                    <TouchableOpacity style={[styles.typeBtn,{backgroundColor:u.is_active?'#6c757d':'#007bff'}]} onPress={()=>handleUserEnabled(u)}><Text style={{color:'#fff',fontWeight:'bold'}}>{u.is_active?'Inhabilitar cuenta':'Habilitar cuenta'}</Text></TouchableOpacity>
                   </View>
-                  <TouchableOpacity style={[styles.typeBtn, { paddingHorizontal: 12, paddingVertical: 8, backgroundColor: u.is_active ? '#28a745' : '#dc3545' }]} onPress={() => handleToggleModulePermission(u, 'is_active')}>
-                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>{u.is_active ? '🟢 EN JORNADA' : '🔴 FUERA DE TURNO'}</Text>
-                  </TouchableOpacity>
                 </View>
+              })}
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.subSectionTitle}>👤 Ver un empleado</Text>
+              <TextInput style={styles.input} placeholder="Período en días (7, 30, 90)" keyboardType="numeric" value={hrDays} onChangeText={setHRDays}/>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                {usersList.filter(u=>u.role!=='superadmin').map(u=><TouchableOpacity key={u.id} style={[styles.typeBtn,{marginRight:6},hrIndividualEmail===u.email&&{backgroundColor:'#007bff'}]} onPress={()=>handleIndividualHR(u.email)}><Text style={{color:hrIndividualEmail===u.email?'#fff':'#333'}}>{u.name}</Text></TouchableOpacity>)}
+              </ScrollView>
+              {hrIndividualEmail && <View style={{marginTop:10}}>
+                <Text style={{fontWeight:'bold'}}>{hrIndividualEmail} · {hrIndividualLogs.length} registros</Text>
+                {hrIndividualLogs.slice(0,20).map(l=><Text key={l.id} style={{fontSize:11,paddingVertical:4}}>{l.date} · {l.clock_in} → {l.clock_out} · {l.hours_worked ?? 0} hs · Rol: {l.role_worked || '-'}</Text>)}
+              </View>}
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.subSectionTitle}>⚖ Comparar 2, 3 o todos</Text>
+              <Text style={{fontSize:11,color:'#666',marginBottom:8}}>Seleccionados: {hrSelectedEmails.length}. Comparación contextual por rol, sin ranking automático.</Text>
+              <View style={{flexDirection:'row',flexWrap:'wrap'}}>
+                {usersList.filter(u=>u.role!=='superadmin').map(u=><TouchableOpacity key={u.id} style={[styles.typeBtn,{marginRight:6,marginBottom:6},hrSelectedEmails.includes(u.email)&&{backgroundColor:'#6f42c1'}]} onPress={()=>toggleHRCompare(u.email)}><Text style={{color:hrSelectedEmails.includes(u.email)?'#fff':'#333'}}>{u.name}</Text></TouchableOpacity>)}
               </View>
-            ))}
-
-            <View style={[styles.card, { marginTop: 10 }]}>
-              <Text style={styles.subSectionTitle}>⚖ Comparativa de Desempeño</Text>
-              <TouchableOpacity style={styles.buttonPrimary} onPress={handleCompareEmployees} disabled={loading}>
-                <Text style={styles.buttonText}>🔍 Comparar Rendimiento</Text>
-              </TouchableOpacity>
-
-              {comparisonResult && (
-                <View style={{ marginTop: 15, backgroundColor: '#f8f9fa', padding: 12, borderRadius: 8 }}>
-                  <Text style={{ fontWeight: 'bold', fontSize: 15, color: '#007bff', textAlign: 'center', marginBottom: 10 }}>📊 Resultados Comparativos</Text>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                    <View style={{ flex: 0.48, backgroundColor: '#fff', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: '#ddd' }}>
-                      <Text style={{ fontWeight: 'bold', color: '#007bff' }}>{comparisonResult.emp1.name}</Text>
-                      <Text style={{ fontSize: 11 }}>Ventas: {comparisonResult.emp1.sales_count}</Text>
-                      <Text style={{ fontSize: 11 }}>Total: ${comparisonResult.emp1.total_revenue}</Text>
-                      <Text style={{ fontSize: 11 }}>Horas: {comparisonResult.emp1.total_hours} hs</Text>
-                    </View>
-                    <View style={{ flex: 0.48, backgroundColor: '#fff', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: '#ddd' }}>
-                      <Text style={{ fontWeight: 'bold', color: '#6f42c1' }}>{comparisonResult.emp2.name}</Text>
-                      <Text style={{ fontSize: 11 }}>Ventas: {comparisonResult.emp2.sales_count}</Text>
-                      <Text style={{ fontSize: 11 }}>Total: ${comparisonResult.emp2.total_revenue}</Text>
-                      <Text style={{ fontSize: 11 }}>Horas: {comparisonResult.emp2.total_hours} hs</Text>
-                    </View>
-                  </View>
-                </View>
-              )}
+              <TouchableOpacity style={styles.buttonPrimary} onPress={()=>handleHRCompareV2(false)}><Text style={styles.buttonText}>Comparar seleccionados</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.buttonPrimary,{backgroundColor:'#6f42c1'}]} onPress={()=>handleHRCompareV2(true)}><Text style={styles.buttonText}>Comparar todos</Text></TouchableOpacity>
+              {comparisonResult?.employees?.map(emp=><View key={emp.email} style={{marginTop:10,padding:10,backgroundColor:'#f8f9fa',borderRadius:7}}>
+                <Text style={{fontWeight:'bold'}}>{emp.name} · {emp.current_role}</Text>
+                <Text style={{fontSize:11}}>Turnos: {emp.shifts_count} · Horas: {emp.total_hours} · Roles: {Object.entries(emp.roles_worked||{}).map(([r,n])=>`${r} (${n})`).join(', ') || '-'}</Text>
+                <Text style={{fontSize:11}}>Ventas: {emp.sales_count} · Facturación: {formatMoney(emp.total_revenue)} · Ticket prom.: {formatMoney(emp.ticket_avg)}</Text>
+                <Text style={{fontSize:11}}>Preventas: {emp.presales_count} · Caja: {emp.cash_operations} · Mermas: {emp.stock_loss_operations}</Text>
+              </View>)}
             </View>
           </ScrollView>
         )}
