@@ -1325,7 +1325,14 @@ return (
               </View>
             )}
 
-            {userRole === 'superadmin' && editingIngress && (
+            {(canStock || userRole === 'superadmin') && (
+            <TouchableOpacity style={[styles.navBtn, currentTab === 'catalogo' && styles.navActive]} onPress={() => handleTabChange('catalogo')}>
+              <Text style={styles.navIcon}>$</Text>
+              <Text style={styles.navText}>Precios</Text>
+            </TouchableOpacity>
+          )}
+
+          {userRole === 'superadmin' && editingIngress && (
               <View style={styles.card}>
                 <Text style={styles.subSectionTitle}>Corrigiendo ingreso #{editingIngress.id}</Text>
                 <TextInput style={styles.input} placeholder="Cantidad" keyboardType="decimal-pad" value={editIngressQty} onChangeText={setEditIngressQty}/>
@@ -1346,6 +1353,40 @@ return (
         )}
 
         {/* GESTIÓN DE PERMISOS GRANULARES */}
+          {/* CATALOGO / LISTA DE PRECIOS */}
+          {currentTab === 'catalogo' && (canStock || userRole === 'superadmin') && (
+            <ScrollView style={styles.body} contentContainerStyle={styles.scrollPadding}>
+              <Text style={styles.sectionTitle}>Lista de precios</Text>
+              <Text style={{color:'#666',marginBottom:10}}>Vista para clientes. No incluye costo, margen ni proveedor.</Text>
+              <Text style={styles.subSectionTitle}>Categoria</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:10}}>
+                {catalogCategories().map(cat => (
+                  <TouchableOpacity key={cat} style={[styles.badgeBtn,{marginRight:6},catalogCategory===cat && styles.badgeBtnActive]} onPress={()=>setCatalogCategory(cat)}>
+                    <Text>{cat}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              <TouchableOpacity style={[styles.badgeBtn,catalogOnlyStock&&styles.badgeBtnActive,{marginBottom:12}]} onPress={()=>setCatalogOnlyStock(v=>!v)}>
+                <Text>{catalogOnlyStock?'Solo productos con stock':'Mostrar tambien sin stock'}</Text>
+              </TouchableOpacity>
+              <View style={styles.card}>
+                <Text style={{fontWeight:'bold',marginBottom:8}}>{catalogProducts().length} productos</Text>
+                {catalogProducts().slice(0,80).map(p=>(
+                  <View key={p.id} style={{paddingVertical:7,borderBottomWidth:1,borderBottomColor:'#eee',flexDirection:'row',justifyContent:'space-between'}}>
+                    <View style={{flex:1,paddingRight:10}}>
+                      <Text style={{fontWeight:'bold'}}>{p.name}</Text>
+                      <Text style={{fontSize:11,color:'#666'}}>{p.category||'Varios'}{p.brand?' - '+p.brand:''}</Text>
+                    </View>
+                    <Text style={{fontWeight:'bold'}}>{formatMoney(p.price_per_unit)}</Text>
+                  </View>
+                ))}
+              </View>
+              <TouchableOpacity style={styles.buttonPrimary} onPress={exportCatalogPDF}><Text style={styles.buttonText}>Generar / compartir PDF</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.buttonSuccess} onPress={exportCatalogExcel}><Text style={styles.buttonText}>Generar / compartir Excel</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.buttonCamera,{marginTop:10}]} onPress={shareCatalogText}><Text style={styles.buttonText}>Compartir por WhatsApp / texto</Text></TouchableOpacity>
+            </ScrollView>
+          )}
+
         {currentTab === 'permisos' && userRole === 'superadmin' && (
           <ScrollView contentContainerStyle={styles.scrollPadding}>
             <Text style={styles.sectionTitle}>👥 Permisos por Módulo y Roles</Text>

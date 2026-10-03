@@ -11,8 +11,12 @@
   "dependencies": {
     "expo": "~51.0.0",
     "expo-camera": "~15.0.13",
+    "expo-file-system": "~17.0.1",
+    "expo-print": "~13.0.1",
+    "expo-sharing": "~12.0.1",
     "react": "18.2.0",
-    "react-native": "0.74.5"
+    "react-native": "0.74.5",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0"
