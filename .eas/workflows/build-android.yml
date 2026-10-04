@@ -1,0 +1,8 @@
+name: Build Android APK
+
+jobs:
+  build_android:
+    type: build
+    params:
+      platform: android
+      profile: preview
