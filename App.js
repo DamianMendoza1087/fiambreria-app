@@ -1569,14 +1569,14 @@ return (
               </View>
             )}
 
-            {(canStock || userRole === 'superadmin') && (
+            (canStock || isAdminLevel)
             <TouchableOpacity style={[styles.navBtn, currentTab === 'catalogo' && styles.navActive]} onPress={() => handleTabChange('catalogo')}>
               <Text style={styles.navIcon}>$</Text>
               <Text style={styles.navText}>Precios</Text>
             </TouchableOpacity>
           )}
 
-          {userRole === 'superadmin' && editingIngress && (
+          {isAdminLevel && editingIngress && (
               <View style={styles.card}>
                 <Text style={styles.subSectionTitle}>Corrigiendo ingreso #{editingIngress.id}</Text>
                 <TextInput style={styles.input} placeholder="Cantidad" keyboardType="decimal-pad" value={editIngressQty} onChangeText={setEditIngressQty}/>
@@ -1598,7 +1598,7 @@ return (
 
         {/* GESTIÓN DE PERMISOS GRANULARES */}
           {/* CATALOGO / LISTA DE PRECIOS */}
-          {currentTab === 'catalogo' && (canStock || userRole === 'superadmin') && (
+          {currentTab === 'catalogo' && (canStock || isAdminLevel) && (
             <ScrollView style={styles.body} contentContainerStyle={styles.scrollPadding}>
               <Text style={styles.sectionTitle}>Lista de precios</Text>
 
