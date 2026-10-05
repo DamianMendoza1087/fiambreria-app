@@ -902,6 +902,22 @@ export default function App() {
     finally { setLoading(false); }
   };
 
+  const handleUserBranchChange = async (user, newBranchId) => {
+    if (user.email?.toLowerCase() === 'admin@fiambreria.com') {
+      return alert('El Admin Maestro trabaja con ambas sucursales.');
+    }
+    try {
+      setLoading(true);
+      await updateUserPermissions(user.id, { branch_id: newBranchId });
+      await loadInitialData();
+      alert(`Sucursal de ${user.name} actualizada.`);
+    } catch (e) {
+      alert('Error cambiando sucursal');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleRoleChange = async (user, newRole) => {
     if (user.email?.toLowerCase() === 'admin@fiambreria.com') {
       return alert('SolidSnake es el Admin Maestro y no puede ser degradado.');
@@ -1764,26 +1780,144 @@ return (
             <Text style={styles.subSectionTitle}>Acceso a Módulos y Roles</Text>
             {usersList.map(u => (
               <View key={u.id} style={styles.card}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <Text style={{ fontWeight: 'bold', fontSize: 15 }}>
+                <View style={{ marginBottom: 10 }}>
+                  <Text
+                    style={{ fontWeight: 'bold', fontSize: 16, flexShrink: 1 }}
+                    numberOfLines={2}
+                  >
                     {u.email?.toLowerCase() === 'admin@fiambreria.com'
                       ? '🐍 SolidSnake · Admin Maestro'
-                      : `${u.name} (${u.email})`}
+                      : u.name}
                   </Text>
 
-                  {/* Selector de Rol */}
-                  <View style={{ flexDirection: 'row' }}>
-                    <TouchableOpacity style={[styles.roleBtn, u.role === 'superadmin' && styles.roleBtnActiveAdmin]} onPress={() => handleRoleChange(u, 'superadmin')}>
-                      <Text style={{ fontSize: 9, fontWeight: 'bold', color: u.role === 'superadmin' ? '#fff' : '#333' }}>SUPERADMIN</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.roleBtn, u.role === 'dueno' && styles.roleBtnActiveDueno, { marginLeft: 4 }]} onPress={() => handleRoleChange(u, 'dueno')}>
-                      <Text style={{ fontSize: 9, fontWeight: 'bold', color: u.role === 'dueno' ? '#fff' : '#333' }}>DUEÑO</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.roleBtn, u.role === 'vendedor' && styles.roleBtnActiveUser, { marginLeft: 4 }]} onPress={() => handleRoleChange(u, 'vendedor')}>
-                      <Text style={{ fontSize: 9, fontWeight: 'bold', color: u.role === 'vendedor' ? '#fff' : '#333' }}>EMPLEADO</Text>
-                    </TouchableOpacity>
-                  </View>
+                  {u.email?.toLowerCase() !== 'admin@fiambreria.com' && (
+                    <Text style={{ fontSize: 11, color: '#666', marginTop: 2 }}>
+                      {u.email}
+                    </Text>
+                  )}
                 </View>
+
+                {u.email?.toLowerCase() === 'admin@fiambreria.com' ? (
+                  <View style={{
+                    backgroundColor: '#212529',
+                    paddingVertical: 9,
+                    paddingHorizontal: 12,
+                    borderRadius: 8,
+                    marginBottom: 10
+                  }}>
+                    <Text style={{ color: '#fff', fontWeight: 'bold', textAlign: 'center' }}>
+                      🛡 ADMIN MAESTRO · Acceso a ambas sucursales
+                    </Text>
+                  </View>
+                ) : (
+                  <>
+                    <Text style={{ fontSize: 12, fontWeight: 'bold', marginBottom: 5 }}>
+                      Rol del usuario
+                    </Text>
+
+                    <View style={{
+                      flexDirection: 'row',
+                      flexWrap: 'wrap',
+                      marginBottom: 12
+                    }}>
+                      <TouchableOpacity
+                        style={[
+                          styles.roleBtn,
+                          u.role === 'superadmin' && styles.roleBtnActiveAdmin,
+                          { marginRight: 6, marginBottom: 6 }
+                        ]}
+                        onPress={() => handleRoleChange(u, 'superadmin')}
+                      >
+                        <Text style={{
+                          fontSize: 10,
+                          fontWeight: 'bold',
+                          color: u.role === 'superadmin' ? '#fff' : '#333'
+                        }}>
+                          SUPERADMIN
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[
+                          styles.roleBtn,
+                          u.role === 'dueno' && styles.roleBtnActiveDueno,
+                          { marginRight: 6, marginBottom: 6 }
+                        ]}
+                        onPress={() => handleRoleChange(u, 'dueno')}
+                      >
+                        <Text style={{
+                          fontSize: 10,
+                          fontWeight: 'bold',
+                          color: u.role === 'dueno' ? '#fff' : '#333'
+                        }}>
+                          DUEÑO
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[
+                          styles.roleBtn,
+                          u.role === 'vendedor' && styles.roleBtnActiveUser,
+                          { marginBottom: 6 }
+                        ]}
+                        onPress={() => handleRoleChange(u, 'vendedor')}
+                      >
+                        <Text style={{
+                          fontSize: 10,
+                          fontWeight: 'bold',
+                          color: u.role === 'vendedor' ? '#fff' : '#333'
+                        }}>
+                          EMPLEADO
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <Text style={{ fontSize: 12, fontWeight: 'bold', marginBottom: 5 }}>
+                      Sucursal de trabajo
+                    </Text>
+
+                    <View style={{
+                      flexDirection: 'row',
+                      marginBottom: 12
+                    }}>
+                      <TouchableOpacity
+                        style={[
+                          styles.badgeBtn,
+                          Number(u.branch_id || 1) === 1 && styles.badgeBtnActive,
+                          { flex: 1, marginRight: 5 }
+                        ]}
+                        onPress={() => handleUserBranchChange(u, 1)}
+                      >
+                        <Text style={{
+                          fontSize: 11,
+                          fontWeight: 'bold',
+                          textAlign: 'center',
+                          color: Number(u.branch_id || 1) === 1 ? '#fff' : '#333'
+                        }}>
+                          🍖 Fiambrería
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[
+                          styles.badgeBtn,
+                          Number(u.branch_id || 1) === 2 && styles.badgeBtnActive,
+                          { flex: 1, marginLeft: 5 }
+                        ]}
+                        onPress={() => handleUserBranchChange(u, 2)}
+                      >
+                        <Text style={{
+                          fontSize: 11,
+                          fontWeight: 'bold',
+                          textAlign: 'center',
+                          color: Number(u.branch_id || 1) === 2 ? '#fff' : '#333'
+                        }}>
+                          🎪 Feria Damyale
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                )}
 
                 <View style={{ borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 8 }}>
                     <TouchableOpacity style={[styles.badgeBtn, u.can_edit_records && styles.badgeBtnActiveEdit, { width: '100%', marginBottom: 6 }]} onPress={() => handleToggleModulePermission(u, 'can_edit_records')}>
