@@ -81,11 +81,11 @@ export const submitStockAudit = async (productId, countedQty, reportedBy, branch
   return await res.json();
 };
 
-export const createPreSale = async (items, branchId = 1) => {
+export const createPreSale = async (items, branchId = 1, createdBy = "Anonimo") => {
   const res = await fetch(`${API_URL}/presales?branch_id=${branchId}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ items }),
+    body: JSON.stringify({ items, created_by: createdBy }),
   });
   if (!res.ok) throw new Error("Error al generar pre-venta");
   return await res.json();

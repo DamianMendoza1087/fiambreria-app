@@ -385,7 +385,7 @@ export default function App() {
         setBranchId(null);
         setBranchSelectorPending(true);
       } else {
-        setBranchId(1);
+        setBranchId(Number(res.branch_id || 1));
         setBranchSelectorPending(false);
       }
     } catch (e) { alert('Error: ' + e.message); }
@@ -669,7 +669,7 @@ export default function App() {
     try {
       setLoading(true);
       const items = vendorCart.map(i => ({ product_id: i.id, quantity: parseFloat(i.qty) || 0 }));
-      const res = await createPreSale({ items, created_by: email });
+      const res = await createPreSale(items, branchId || 1, email);
       alert(`✅ Pre-venta #${res.presale_id} enviada a caja`);
       setVendorCart([]);
       await loadInitialData();
