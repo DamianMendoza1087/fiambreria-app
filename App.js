@@ -752,7 +752,7 @@ export default function App() {
   };
 
   const handleCancelPreSale = async (psId) => {
-    if (!canEditRecords && userRole !== 'superadmin') return alert('⚠️ No tenés permiso para eliminar o cancelar registros.');
+    if (!canEditRecords && !isAdminLevel) return alert('⚠️ No tenés permiso para eliminar o cancelar registros.');
     try {
       setLoading(true);
       await deletePreSale(psId, branchId || 1);
@@ -920,7 +920,7 @@ export default function App() {
   };
 
   const handleStartEditProduct = (prod) => {
-    if (!canEditRecords && userRole !== 'superadmin') return alert('⚠️ No tenés permiso para editar registros.');
+    if (!canEditRecords && !isAdminLevel) return alert('⚠️ No tenés permiso para editar registros.');
     setEditingProductId(prod.id);
     setProdName(prod.name);
     setProdCategory(prod.category || 'Varios');
@@ -1071,7 +1071,7 @@ export default function App() {
     );
   }
 
-  if (!isAccountActive && userRole !== 'superadmin') {
+  if (!isAccountActive && !isAdminLevel) {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.loginCard}>
@@ -1100,7 +1100,7 @@ return (
           <Text style={styles.branchHeader}>📍 {branchName}</Text>
         </View>
         <View style={{alignItems:'flex-end'}}>
-          {userRole === 'superadmin' && (
+          {isAdminLevel && (
             <TouchableOpacity onPress={changeBranch} style={styles.changeBranchBtn}>
               <Text style={styles.changeBranchText}>⇄ Cambiar sucursal</Text>
             </TouchableOpacity>
@@ -1113,7 +1113,7 @@ return (
 
       <View style={styles.body}>
         {/* PRE-VENTA */}
-        {currentTab === 'preventa' && (canPreventa || userRole === 'superadmin') && (
+        {currentTab === 'preventa' && (canPreventa || isAdminLevel) && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>🛒 Pre-venta (Mostrador)</Text>
 
@@ -1193,7 +1193,7 @@ return (
         )}
 
         {/* CAJA */}
-        {currentTab === 'caja' && (canCaja || userRole === 'superadmin') && (
+        {currentTab === 'caja' && (canCaja || isAdminLevel) && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>💳 Caja y Cobro</Text>
 
@@ -1270,7 +1270,7 @@ return (
                           <Text style={{ color: selectedPreSaleId === ps.id ? '#fff' : '#333' }}>{formatMoney(ps.total)}</Text>
                         </TouchableOpacity>
 
-                        {(canEditRecords || userRole === 'superadmin') && (
+                        {(canEditRecords || isAdminLevel) && (
                           <TouchableOpacity style={{ backgroundColor: '#dc3545', padding: 8, borderRadius: 6, marginRight: 12 }} onPress={() => handleCancelPreSale(ps.id)}>
                             <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 11 }}>❌ Borrar</Text>
                           </TouchableOpacity>
@@ -1378,7 +1378,7 @@ return (
         )}
 
         {/* KPIS V2 - RENTABILIDAD REAL */}
-        {currentTab === 'kpis' && (canKPIs || userRole === 'superadmin') && (
+        {currentTab === 'kpis' && (canKPIs || isAdminLevel) && (
           <ScrollView contentContainerStyle={styles.scrollPadding}>
             <Text style={styles.sectionTitle}>📈 Rentabilidad y flujo de caja</Text>
             <View style={{flexDirection:'row',marginBottom:10}}>
@@ -1431,7 +1431,7 @@ return (
         )}
 
         {/* ALERTAS V2 */}
-        {currentTab === 'alertas' && (canAlertas || userRole === 'superadmin') && (
+        {currentTab === 'alertas' && (canAlertas || isAdminLevel) && (
           <ScrollView contentContainerStyle={styles.scrollPadding}>
             <Text style={styles.sectionTitle}>🚨 Alertas críticas y operativas</Text>
             <View style={{flexDirection:'row',marginBottom:10}}>
@@ -1455,7 +1455,7 @@ return (
         )}
 
         {/* RRHH V2 */}
-        {currentTab === 'rrhh' && (canRRHH || userRole === 'superadmin') && (
+        {currentTab === 'rrhh' && (canRRHH || isAdminLevel) && (
           <ScrollView contentContainerStyle={styles.scrollPadding}>
             <Text style={styles.sectionTitle}>👨‍💼 RRHH y Turnos</Text>
             <View style={styles.card}>
@@ -1506,7 +1506,7 @@ return (
         )}
 
         {/* MRP V2 */}
-        {currentTab === 'mrp' && (canMRP || userRole === 'superadmin') && (
+        {currentTab === 'mrp' && (canMRP || isAdminLevel) && (
           <ScrollView contentContainerStyle={styles.scrollPadding}>
             <Text style={styles.sectionTitle}>📦 Reposición de mercadería</Text>
             <Text style={{fontSize:12,color:'#666',marginBottom:10}}>
@@ -1612,7 +1612,7 @@ return (
         )}
 
         {/* VERIFICACIÓN / ARQUEOS */}
-        {currentTab === 'verificacion' && (canVerificacion || userRole === 'superadmin') && (
+        {currentTab === 'verificacion' && (canVerificacion || isAdminLevel) && (
           <ScrollView contentContainerStyle={styles.scrollPadding}>
             <Text style={styles.sectionTitle}>🔍 Verificación de Caja</Text>
             {cashAuditsList.map(audit => (
@@ -1629,7 +1629,7 @@ return (
         )}
 
         {/* INVENTARIO / STOCK / FEFO */}
-        {currentTab === 'inventario' && (canStock || userRole === 'superadmin') && (
+        {currentTab === 'inventario' && (canStock || isAdminLevel) && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>📦 Control FEFO e Inventario</Text>
             <TouchableOpacity style={styles.buttonCamera} onPress={() => toggleCamera('stock')}>
@@ -1682,7 +1682,7 @@ return (
         )}
 
         {/* INGRESOS V2 */}
-        {currentTab === 'ingresos' && (canIngreso || userRole === 'superadmin') && (
+        {currentTab === 'ingresos' && (canIngreso || isAdminLevel) && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>📥 Ingreso de Mercadería</Text>
             <View style={styles.card}>
@@ -2008,63 +2008,63 @@ return (
       {/* NAVBAR NAVEGABLE COMPLETO */}
       <View style={styles.navbarWrapper}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.navbarContent}>
-          {(canKPIs || userRole === 'superadmin') && (
+          {(canKPIs || isAdminLevel) && (
             <TouchableOpacity style={[styles.navBtn, currentTab === 'kpis' && styles.navActive]} onPress={() => handleTabChange('kpis')}>
               <Text style={styles.navIcon}>📈</Text>
               <Text style={styles.navText}>KPIs</Text>
             </TouchableOpacity>
           )}
 
-          {(canPreventa || userRole === 'superadmin') && (
+          {(canPreventa || isAdminLevel) && (
             <TouchableOpacity style={[styles.navBtn, currentTab === 'preventa' && styles.navActive]} onPress={() => handleTabChange('preventa')}>
               <Text style={styles.navIcon}>🛒</Text>
               <Text style={styles.navText}>Ventas</Text>
             </TouchableOpacity>
           )}
 
-          {(canCaja || userRole === 'superadmin') && (
+          {(canCaja || isAdminLevel) && (
             <TouchableOpacity style={[styles.navBtn, currentTab === 'caja' && styles.navActive]} onPress={() => handleTabChange('caja')}>
               <Text style={styles.navIcon}>💳</Text>
               <Text style={styles.navText}>Caja</Text>
             </TouchableOpacity>
           )}
 
-          {(canAlertas || userRole === 'superadmin') && (
+          {(canAlertas || isAdminLevel) && (
             <TouchableOpacity style={[styles.navBtn, currentTab === 'alertas' && styles.navActive]} onPress={() => handleTabChange('alertas')}>
               <Text style={styles.navIcon}>🚨</Text>
               <Text style={styles.navText}>Alertas</Text>
             </TouchableOpacity>
           )}
 
-          {(canRRHH || userRole === 'superadmin') && (
+          {(canRRHH || isAdminLevel) && (
             <TouchableOpacity style={[styles.navBtn, currentTab === 'rrhh' && styles.navActive]} onPress={() => handleTabChange('rrhh')}>
               <Text style={styles.navIcon}>👨‍💼</Text>
               <Text style={styles.navText}>RRHH</Text>
             </TouchableOpacity>
           )}
 
-          {(canMRP || userRole === 'superadmin') && (
+          {(canMRP || isAdminLevel) && (
             <TouchableOpacity style={[styles.navBtn, currentTab === 'mrp' && styles.navActive]} onPress={() => handleTabChange('mrp')}>
               <Text style={styles.navIcon}>📊</Text>
               <Text style={styles.navText}>MRP</Text>
             </TouchableOpacity>
           )}
 
-          {(canVerificacion || userRole === 'superadmin') && (
+          {(canVerificacion || isAdminLevel) && (
             <TouchableOpacity style={[styles.navBtn, currentTab === 'verificacion' && styles.navActive]} onPress={() => handleTabChange('verificacion')}>
               <Text style={styles.navIcon}>🔍</Text>
               <Text style={styles.navText}>Arqueo</Text>
             </TouchableOpacity>
           )}
 
-          {(canStock || userRole === 'superadmin') && (
+          {(canStock || isAdminLevel) && (
             <TouchableOpacity style={[styles.navBtn, currentTab === 'inventario' && styles.navActive]} onPress={() => handleTabChange('inventario')}>
               <Text style={styles.navIcon}>📦</Text>
               <Text style={styles.navText}>Stock</Text>
             </TouchableOpacity>
           )}
 
-          {(canIngreso || userRole === 'superadmin') && (
+          {(canIngreso || isAdminLevel) && (
             <TouchableOpacity style={[styles.navBtn, currentTab === 'ingresos' && styles.navActive]} onPress={() => handleTabChange('ingresos')}>
               <Text style={styles.navIcon}>📥</Text>
               <Text style={styles.navText}>Ingresos</Text>
