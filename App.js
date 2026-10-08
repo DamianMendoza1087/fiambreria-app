@@ -679,7 +679,8 @@ export default function App() {
           finalQtyKg = val / 1000;
         }
         if (finalQtyKg > maxStock) {
-          alert(`⚠️ Supera el stock (${maxStock} kg). Disponible: ${maxStock} kg`);
+          alert(`⚠️ Stock insuficiente. Disponible: ${maxStock} kg`);
+          return item;
         }
         return { ...item, qty: cleanVal };
       }
@@ -785,7 +786,8 @@ export default function App() {
           finalQtyKg = val / 1000;
         }
         if (finalQtyKg > maxStock) {
-          alert(`⚠️ Supera el stock (${maxStock} kg). Disponible: ${maxStock} kg`);
+          alert(`⚠️ Stock insuficiente. Disponible: ${maxStock} kg`);
+          return item;
         }
         return { ...item, qty: cleanVal };
       }
@@ -1010,7 +1012,7 @@ export default function App() {
 
   const handleRoleChange = async (user, newRole) => {
     if (user.email?.toLowerCase() === 'admin@fiambreria.com') {
-      return alert('SolidSnake erige el Admin Maestro y no puede ser degradado.');
+      return alert('SolidSnake es el Admin Maestro y no puede ser degradado.');
     }
     try {
       setLoading(true);
