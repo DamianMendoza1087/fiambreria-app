@@ -674,11 +674,7 @@ export default function App() {
 
     setVendorCart(vendorCart.map(item => {
       if (item.id === id) {
-        let finalQtyKg = val;
-        if (item.unit_type === 'kg') {
-          finalQtyKg = val / 1000;
-        }
-        if (finalQtyKg > maxStock) {
+        if (item.unit_type === 'kg' && val > maxStock) {
           alert(`⚠️ Stock insuficiente. Disponible: ${maxStock} kg`);
           return item;
         }
@@ -693,13 +689,12 @@ export default function App() {
     for (const item of vendorCart) {
       const qNum = parseFloat(String(item.qty).replace(',', '.')) || 0;
       if (item.unit_type === 'kg') {
-        const kgVal = qNum / 1000;
-        if (kgVal <= 0) {
+        if (qNum <= 0) {
           return alert(`Ingresá el peso de ${item.name}`);
         }
         const prod = products.find(p => p.id === item.id);
         const maxStock = prod ? prod.stock : 999;
-        if (kgVal > maxStock) {
+        if (qNum > maxStock) {
           return alert(`Stock insuficiente. Disponible: ${maxStock} kg`);
         }
       } else {
@@ -715,11 +710,10 @@ export default function App() {
     }
     try {
       setLoading(true);
-      const items = vendorCart.map(i => {
-        const raw = parseFloat(String(i.qty).replace(',', '.')) || 0;
-        const finalQty = i.unit_type === 'kg' ? raw / 1000 : raw;
-        return { product_id: i.id, quantity: finalQty };
-      });
+      const items = vendorCart.map(i => ({
+        product_id: i.id,
+        quantity: parseFloat(String(i.qty).replace(',', '.')) || 0
+      }));
       const res = await createPreSale(items, branchId || 1, email);
       alert(`✅ Pre-venta #${res.presale_id} enviada a caja`);
       setVendorCart([]);
@@ -733,13 +727,12 @@ export default function App() {
     setCashierCart(ps.items.map(i => {
       const prod = products.find(p => p.id === i.product_id);
       const uType = i.unit_type || (prod ? prod.unit_type : 'unid');
-      const visualQty = uType === 'kg' ? Math.round(i.qty * 1000) : i.qty;
       return {
         id: i.product_id,
         name: i.name,
         price_per_unit: i.price_per_unit,
         unit_type: uType,
-        qty: visualQty,
+        qty: i.qty,
         maxStock: prod ? prod.stock : 999
       };
     }));
@@ -781,11 +774,7 @@ export default function App() {
 
     setCashierCart(cashierCart.map(item => {
       if (item.id === id) {
-        let finalQtyKg = val;
-        if (item.unit_type === 'kg') {
-          finalQtyKg = val / 1000;
-        }
-        if (finalQtyKg > maxStock) {
+        if (item.unit_type === 'kg' && val > maxStock) {
           alert(`⚠️ Stock insuficiente. Disponible: ${maxStock} kg`);
           return item;
         }
@@ -810,9 +799,8 @@ export default function App() {
   };
 
   const getCashierTotal = () => cashierCart.reduce((acc, i) => {
-    const raw = parseFloat(String(i.qty).replace(',', '.')) || 0;
-    const qtyInKgOrUnits = i.unit_type === 'kg' ? raw / 1000 : raw;
-    return acc + (i.price_per_unit * qtyInKgOrUnits);
+    const qtyVal = parseFloat(String(i.qty).replace(',', '.')) || 0;
+    return acc + (i.price_per_unit * qtyVal);
   }, 0).toFixed(2);
 
   const getRequiredCash = () => {
@@ -835,13 +823,12 @@ export default function App() {
     for (const item of cashierCart) {
       const qNum = parseFloat(String(item.qty).replace(',', '.')) || 0;
       if (item.unit_type === 'kg') {
-        const kgVal = qNum / 1000;
-        if (kgVal <= 0) {
+        if (qNum <= 0) {
           return alert(`Ingresá el peso de ${item.name}`);
         }
         const prod = products.find(p => p.id === item.id);
         const maxStock = prod ? prod.stock : 999;
-        if (kgVal > maxStock) {
+        if (qNum > maxStock) {
           return alert(`Stock insuficiente. Disponible: ${maxStock} kg`);
         }
       } else {
@@ -874,11 +861,10 @@ export default function App() {
       setLoading(true);
       await finalizeSale({
         presale_id: selectedPreSaleId,
-        items: cashierCart.map(i => {
-          const raw = parseFloat(String(i.qty).replace(',', '.')) || 0;
-          const finalQty = i.unit_type === 'kg' ? raw / 1000 : raw;
-          return { product_id: i.id, quantity: finalQty };
-        }),
+        items: cashierCart.map(i => ({
+          product_id: i.id,
+          quantity: parseFloat(String(i.qty).replace(',', '.')) || 0
+        })),
         total_amount: total,
         amount_cash: cash,
         amount_mp: mp,
@@ -1150,8 +1136,7 @@ return (
             <Text style={styles.subSectionTitle}>Comanda de Pre-venta:</Text>
             {vendorCart.length === 0 ? <Text style={styles.emptyText}>Sin productos seleccionados</Text> : (
               vendorCart.map(i => {
-                const rawNum = parseFloat(String(i.qty).replace(',', '.')) || 0;
-                const calcQty = i.unit_type === 'kg' ? rawNum / 1000 : rawNum;
+                const qtyVal = parseFloat(String(i.qty).replace(',', '.')) || 0;
                 return (
                   <View key={i.id} style={styles.cartRow}>
                     <View style={{ flex: 1 }}>
@@ -1162,10 +1147,10 @@ return (
                     {i.unit_type === 'kg' ? (
                       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <View style={{ alignItems: 'flex-end', marginRight: 6 }}>
-                          <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#555' }}>Peso (gramos)</Text>
+                          <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#555' }}>Peso (kg)</Text>
                           <TextInput style={styles.inputSmall} keyboardType="numeric" value={String(i.qty)} onChangeText={(val) => updateVendorCartDirectQty(i.id, val)} />
                         </View>
-                        <Text style={{ fontSize: 11, marginRight: 8, color: '#444' }}>g</Text>
+                        <Text style={{ fontSize: 11, marginRight: 8, color: '#444' }}>kg</Text>
                       </View>
                     ) : (
                       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -1183,7 +1168,7 @@ return (
                       </View>
                     )}
 
-                    <Text style={{ fontWeight: 'bold' }}>{formatMoney(i.price_per_unit * calcQty)}</Text>
+                    <Text style={{ fontWeight: 'bold' }}>{formatMoney(i.price_per_unit * qtyVal)}</Text>
                   </View>
                 );
               })
@@ -1309,8 +1294,7 @@ return (
 
                 <Text style={styles.subSectionTitle}>Edición de Ticket:</Text>
                 {cashierCart.map(i => {
-                  const rawNum = parseFloat(String(i.qty).replace(',', '.')) || 0;
-                  const calcQty = i.unit_type === 'kg' ? rawNum / 1000 : rawNum;
+                  const qtyVal = parseFloat(String(i.qty).replace(',', '.')) || 0;
                   return (
                     <View key={i.id} style={styles.cartRow}>
                       <View style={{ flex: 1 }}>
@@ -1321,10 +1305,10 @@ return (
                       {i.unit_type === 'kg' ? (
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                           <View style={{ alignItems: 'flex-end', marginRight: 6 }}>
-                            <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#555' }}>Peso (gramos)</Text>
+                            <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#555' }}>Peso (kg)</Text>
                             <TextInput style={styles.inputSmall} keyboardType="numeric" value={String(i.qty)} onChangeText={(val) => updateCashierCartDirectQty(i.id, val)} />
                           </View>
-                          <Text style={{ fontSize: 11, marginRight: 8 }}>g</Text>
+                          <Text style={{ fontSize: 11, marginRight: 8 }}>kg</Text>
                         </View>
                       ) : (
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -1335,7 +1319,7 @@ return (
                         </View>
                       )}
 
-                      <Text style={{ fontWeight: 'bold' }}>{formatMoney(i.price_per_unit * calcQty)}</Text>
+                      <Text style={{ fontWeight: 'bold' }}>{formatMoney(i.price_per_unit * qtyVal)}</Text>
                     </View>
                   );
                 })}
