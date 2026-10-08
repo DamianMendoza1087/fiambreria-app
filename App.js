@@ -353,9 +353,21 @@ export default function App() {
     try {
       setLoading(true);
       await updateReplenishmentPolicy(productId, policy, email || 'superadmin', 'Cambio desde módulo MRP');
-      setProducts(await fetchProducts(branchId || 1));
+      const updatedProducts = await fetchProducts(branchId || 1);
+      setProducts(updatedProducts);
       setMrpSuggestions(await fetchMRPStats(parseInt(mrpDays,10)||7, parseInt(mrpTargetDays,10)||3, branchId || 1));
       setSystemAlerts(await fetchSystemAlerts(branchId || 1));
+      
+      const targetProd = updatedProducts.find(p => p.id === productId);
+      const prodNameStr = targetProd ? targetProd.name : `Producto #${productId}`;
+      const policyLabels = {
+        'MRP': '🤖 MRP automático',
+        'MANUAL': '✋ Reposición manual',
+        'PAUSED': '⏸ No reponer',
+        'DISCONTINUED': '⛔ Discontinuado'
+      };
+      const readablePolicy = policyLabels[policy] || policy;
+      alert(`✅ ${prodNameStr}: ${readablePolicy}`);
     } catch(e) { alert(e.message); } finally { setLoading(false); }
   };
 
@@ -1496,26 +1508,105 @@ return (
         {/* MRP V2 */}
         {currentTab === 'mrp' && (canMRP || userRole === 'superadmin') && (
           <ScrollView contentContainerStyle={styles.scrollPadding}>
-            <Text style={styles.sectionTitle}>📦 MRP: Compras Inteligentes</Text>
+            <Text style={styles.sectionTitle}>📦 Reposición de mercadería</Text>
+            <Text style={{fontSize:12,color:'#666',marginBottom:10}}>
+              "El sistema analiza las ventas y el stock para ayudarte a decidir qué productos comprar."
+            </Text>
+
             <View style={styles.card}>
+              <Text style={{fontSize:12,fontWeight:'bold',color:'#444',marginBottom:4}}>Días de ventas analizados</Text>
+              <Text style={{fontSize:11,color:'#666',marginBottom:4}}>Período que se usa para calcular el consumo promedio.</Text>
               <TextInput style={styles.input} placeholder="Días de ventas analizados" keyboardType="numeric" value={mrpDays} onChangeText={setMrpDays}/>
+
+              <Text style={{fontSize:12,fontWeight:'bold',color:'#444',marginBottom:4}}>Días objetivo de stock</Text>
+              <Text style={{fontSize:11,color:'#666',marginBottom:4}}>Cantidad de días de mercadería que querés tener disponibles.</Text>
               <TextInput style={styles.input} placeholder="Días objetivo de stock" keyboardType="numeric" value={mrpTargetDays} onChangeText={setMrpTargetDays}/>
+
               <TouchableOpacity style={styles.buttonPrimary} onPress={loadMRPData} disabled={loading}><Text style={styles.buttonText}>📊 Recalcular sugerencias</Text></TouchableOpacity>
             </View>
-            {mrpSuggestions.length===0 && <View style={styles.card}><Text>Sin compras automáticas sugeridas.</Text></View>}
-            {mrpSuggestions.map(item=><View key={item.product_id} style={styles.card}>
-              <Text style={{fontWeight:'bold'}}>{item.product_name}</Text>
-              <Text>Stock: {item.current_stock} · Comprar: {item.suggested_buy} · {formatMoney(item.estimated_cost)}</Text>
-              <Text style={{fontSize:11}}>Política: {item.replenishment_policy||'MRP'}</Text>
-              <View style={{flexDirection:'row',flexWrap:'wrap',marginTop:6}}>
-                {[['MRP','🤖 Automático'],['MANUAL','✋ Manual'],['PAUSED','⏸ No reponer'],['DISCONTINUED','⛔ Discontinuado']].map(([pol,label])=><TouchableOpacity key={pol} style={[styles.typeBtn,{marginRight:4,marginBottom:4}]} onPress={()=>handleReplenishmentPolicy(item.product_id,pol)}><Text>{label}</Text></TouchableOpacity>)}
+
+            <Text style={styles.subSectionTitle}>🤖 Sugerencias de compra</Text>
+            {mrpSuggestions.length===0 && (
+              <View style={styles.card}>
+                <Text style={{color:'#155724',fontSize:13}}>✅ No hay productos que necesiten reposición automática con la configuración actual.</Text>
               </View>
-            </View>)}
-            <View style={styles.card}><Text style={styles.subSectionTitle}>Política de productos</Text>
-              {products.filter(p=>p.is_active).slice(0,100).map(p=><View key={p.id} style={{paddingVertical:6,borderBottomWidth:1,borderBottomColor:'#eee'}}>
-                <Text style={{fontWeight:'bold'}}>{p.name}</Text><Text style={{fontSize:10}}>Stock {p.stock} · {p.replenishment_policy||'MRP'}</Text>
-                <View style={{flexDirection:'row',flexWrap:'wrap'}}>{[['MRP','Automático'],['MANUAL','Manual'],['PAUSED','No reponer']].map(([pol,label])=><TouchableOpacity key={pol} style={[styles.typeBtn,{marginRight:4,marginTop:4},(p.replenishment_policy||'MRP')===pol&&{backgroundColor:'#007bff'}]} onPress={()=>handleReplenishmentPolicy(p.id,pol)}><Text style={{fontSize:10,color:(p.replenishment_policy||'MRP')===pol?'#fff':'#333'}}>{label}</Text></TouchableOpacity>)}</View>
-              </View>)}
+            )}
+            {mrpSuggestions.map(item=>(
+              <View key={item.product_id} style={styles.card}>
+                <Text style={{fontWeight:'bold',fontSize:15,color:'#222',marginBottom:4}}>{item.product_name}</Text>
+                <Text style={{fontSize:13,color:'#444'}}>Stock actual: {item.current_stock}</Text>
+                <Text style={{fontSize:13,color:'#444'}}>Compra sugerida: {item.suggested_buy}</Text>
+                <Text style={{fontSize:13,fontWeight:'bold',color:'#28a745',marginTop:2}}>Costo estimado: {formatMoney(item.estimated_cost)}</Text>
+                <Text style={{fontSize:11,color:'#777',marginTop:4}}>Política: {item.replenishment_policy||'MRP'}</Text>
+                <View style={{flexDirection:'row',flexWrap:'wrap',marginTop:6}}>
+                  {[
+                    ['MRP','🤖 MRP automático'],
+                    ['MANUAL','✋ Reposición manual'],
+                    ['PAUSED','⏸ No reponer'],
+                    ['DISCONTINUED','⛔ Discontinuado']
+                  ].map(([pol,label])=>(
+                    <TouchableOpacity key={pol} style={[styles.typeBtn,{marginRight:4,marginBottom:4}]} onPress={()=>handleReplenishmentPolicy(item.product_id,pol)}>
+                      <Text style={{fontSize:11}}>{label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            ))}
+
+            <View style={styles.card}>
+              <Text style={styles.subSectionTitle}>¿Cómo se repone cada producto?</Text>
+              <Text style={{fontSize:12,fontWeight:'bold',color:'#333',marginTop:4}}>🤖 MRP automático</Text>
+              <Text style={{fontSize:11,color:'#666',marginBottom:6}}>El sistema analiza ventas y stock y calcula cuánto conviene comprar.</Text>
+
+              <Text style={{fontSize:12,fontWeight:'bold',color:'#333',marginTop:4}}>✋ Reposición manual</Text>
+              <Text style={{fontSize:11,color:'#666',marginBottom:6}}>El producto sigue activo, pero vos decidís cuándo y cuánto comprar.</Text>
+
+              <Text style={{fontSize:12,fontWeight:'bold',color:'#333',marginTop:4}}>⏸ No reponer</Text>
+              <Text style={{fontSize:11,color:'#666',marginBottom:6}}>El producto sigue existiendo, pero queda fuera de las sugerencias de compra.</Text>
+
+              <Text style={{fontSize:12,fontWeight:'bold',color:'#333',marginTop:4}}>⛔ Discontinuado</Text>
+              <Text style={{fontSize:11,color:'#666'}}>Producto que ya no se comercializa normalmente.</Text>
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.subSectionTitle}>⚙️ Configuración por producto</Text>
+              {products.filter(p=>p.is_active).slice(0,100).map(p=>{
+                const currentPol = p.replenishment_policy || 'MRP';
+                const policyLabelsMap = {
+                  'MRP': '🤖 MRP automático',
+                  'MANUAL': '✋ Reposición manual',
+                  'PAUSED': '⏸ No reponer',
+                  'DISCONTINUED': '⛔ Discontinuado'
+                };
+                return (
+                  <View key={p.id} style={{paddingVertical:8,borderBottomWidth:1,borderBottomColor:'#eee'}}>
+                    <Text style={{fontWeight:'bold',fontSize:13}}>{p.name}</Text>
+                    <Text style={{fontSize:11,color:'#555'}}>Stock actual: {p.stock} {p.unit_type} · Reposición: {policyLabelsMap[currentPol] || currentPol}</Text>
+                    <View style={{flexDirection:'row',flexWrap:'wrap',marginTop:6}}>
+                      {[
+                        ['MRP','🤖 MRP automático'],
+                        ['MANUAL','✋ Reposición manual'],
+                        ['PAUSED','⏸ No reponer'],
+                        ['DISCONTINUED','⛔ Discontinuado']
+                      ].map(([pol,label])=>(
+                        <TouchableOpacity 
+                          key={pol} 
+                          style={[
+                            styles.typeBtn,
+                            {marginRight:4,marginTop:4},
+                            currentPol === pol && {backgroundColor:'#007bff'}
+                          ]} 
+                          onPress={()=>handleReplenishmentPolicy(p.id,pol)}
+                        >
+                          <Text style={{fontSize:10,color:currentPol === pol?'#fff':'#333',fontWeight:'bold'}}>
+                            {label}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                );
+              })}
             </View>
           </ScrollView>
         )}
