@@ -71,6 +71,18 @@ export const updateUserPermissions = async (userId, permissions) => {
   return await res.json();
 };
 
+export const fetchLatestProductAudit = async (productId, branchId = 1) => {
+  const res = await fetch(
+    `${API_URL}/products/${productId}/audit/latest?branch_id=${branchId}`
+  );
+
+  if (!res.ok) {
+    throw new Error("Error al consultar el último control físico");
+  }
+
+  return await res.json();
+};
+
 export const submitStockAudit = async (productId, countedQty, reportedBy, branchId = 1) => {
   const res = await fetch(`${API_URL}/products/${productId}/audit?branch_id=${branchId}`, {
     method: "POST",
@@ -370,3 +382,4 @@ export const removeBranchProduct = async (branchId, productId) => {
 
   return await res.json();
 };
+                                                             
