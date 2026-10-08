@@ -640,23 +640,24 @@ export default function App() {
 
   const addToVendorCart = (prod) => {
     const existing = vendorCart.find(i => i.id === prod.id);
-    const step = prod.unit_type === 'kg' ? 0.25 : 1;
-    const currentQty = existing ? existing.qty : 0;
-    const newQty = currentQty + step;
-
-    if (newQty > prod.stock) return alert(`⚠️ Stock insuficiente (${prod.stock} ${prod.unit_type}).`);
-
-    if (existing) setVendorCart(vendorCart.map(i => i.id === prod.id ? { ...i, qty: newQty } : i));
-    else setVendorCart([...vendorCart, { ...prod, qty: step }]);
+    if (existing) {
+      setSearchQueryVendor('');
+      return;
+    }
+    const initialQty = prod.unit_type === 'kg' ? 0 : 1;
+    if (initialQty > 0 && initialQty > prod.stock) {
+      return alert(`⚠️ Stock insuficiente (${prod.stock} ${prod.unit_type}).`);
+    }
+    setVendorCart([...vendorCart, { ...prod, qty: initialQty }]);
     setSearchQueryVendor('');
   };
 
   const updateVendorCartQty = (id, delta) => {
     setVendorCart(vendorCart.map(item => {
       if (item.id === id) {
+        if (item.unit_type === 'kg') return item;
         const prod = products.find(p => p.id === id);
-        const step = item.unit_type === 'kg' ? 0.25 : 1;
-        const newQty = item.qty + (delta * step);
+        const newQty = item.qty + delta;
         const maxStock = prod ? prod.stock : 999;
         if (newQty > maxStock) { alert(`⚠️ Supera el stock (${maxStock})`); return item; }
         return newQty > 0 ? { ...item, qty: newQty } : null;
@@ -673,7 +674,13 @@ export default function App() {
 
     setVendorCart(vendorCart.map(item => {
       if (item.id === id) {
-        if (val > maxStock) alert(`⚠️ Supera el stock (${maxStock}).`);
+        let finalQtyKg = val;
+        if (item.unit_type === 'kg') {
+          finalQtyKg = val / 1000;
+        }
+        if (finalQtyKg > maxStock) {
+          alert(`⚠️ Supera el stock (${maxStock} kg). Disponible: ${maxStock} kg`);
+        }
         return { ...item, qty: cleanVal };
       }
       return item;
@@ -682,9 +689,36 @@ export default function App() {
 
   const handleGeneratePreSale = async () => {
     if (vendorCart.length === 0) return alert('El carrito está vacío');
+    for (const item of vendorCart) {
+      const qNum = parseFloat(String(item.qty).replace(',', '.')) || 0;
+      if (item.unit_type === 'kg') {
+        const kgVal = qNum / 1000;
+        if (kgVal <= 0) {
+          return alert(`Ingresá el peso de ${item.name}`);
+        }
+        const prod = products.find(p => p.id === item.id);
+        const maxStock = prod ? prod.stock : 999;
+        if (kgVal > maxStock) {
+          return alert(`Stock insuficiente. Disponible: ${maxStock} kg`);
+        }
+      } else {
+        if (qNum <= 0) {
+          return alert(`Ingresá la cantidad de ${item.name}`);
+        }
+        const prod = products.find(p => p.id === item.id);
+        const maxStock = prod ? prod.stock : 999;
+        if (qNum > maxStock) {
+          return alert(`Stock insuficiente. Disponible: ${maxStock}`);
+        }
+      }
+    }
     try {
       setLoading(true);
-      const items = vendorCart.map(i => ({ product_id: i.id, quantity: parseFloat(i.qty) || 0 }));
+      const items = vendorCart.map(i => {
+        const raw = parseFloat(String(i.qty).replace(',', '.')) || 0;
+        const finalQty = i.unit_type === 'kg' ? raw / 1000 : raw;
+        return { product_id: i.id, quantity: finalQty };
+      });
       const res = await createPreSale(items, branchId || 1, email);
       alert(`✅ Pre-venta #${res.presale_id} enviada a caja`);
       setVendorCart([]);
@@ -697,12 +731,14 @@ export default function App() {
     setSelectedPreSaleId(ps.id);
     setCashierCart(ps.items.map(i => {
       const prod = products.find(p => p.id === i.product_id);
+      const uType = i.unit_type || (prod ? prod.unit_type : 'unid');
+      const visualQty = uType === 'kg' ? Math.round(i.qty * 1000) : i.qty;
       return {
         id: i.product_id,
         name: i.name,
         price_per_unit: i.price_per_unit,
-        unit_type: i.unit_type || (prod ? prod.unit_type : 'unid'),
-        qty: i.qty,
+        unit_type: uType,
+        qty: visualQty,
         maxStock: prod ? prod.stock : 999
       };
     }));
@@ -724,10 +760,10 @@ export default function App() {
   const updateCashierCartQty = (id, delta) => {
     setCashierCart(cashierCart.map(item => {
       if (item.id === id) {
+        if (item.unit_type === 'kg') return item;
         const prod = products.find(p => p.id === id);
-        const step = item.unit_type === 'kg' ? 0.25 : 1;
         const currentNum = parseFloat(item.qty) || 0;
-        const newQty = currentNum + (delta * step);
+        const newQty = currentNum + delta;
         const maxStock = prod ? prod.stock : 999;
         if (newQty > maxStock) { alert(`⚠️ Supera el stock (${maxStock})`); return item; }
         return newQty > 0 ? { ...item, qty: newQty } : null;
@@ -744,7 +780,13 @@ export default function App() {
 
     setCashierCart(cashierCart.map(item => {
       if (item.id === id) {
-        if (val > maxStock) alert(`⚠️ Supera el stock (${maxStock}).`);
+        let finalQtyKg = val;
+        if (item.unit_type === 'kg') {
+          finalQtyKg = val / 1000;
+        }
+        if (finalQtyKg > maxStock) {
+          alert(`⚠️ Supera el stock (${maxStock} kg). Disponible: ${maxStock} kg`);
+        }
         return { ...item, qty: cleanVal };
       }
       return item;
@@ -753,18 +795,23 @@ export default function App() {
 
   const addToCashierCart = (prod) => {
     const existing = cashierCart.find(i => i.id === prod.id);
-    const step = prod.unit_type === 'kg' ? 0.25 : 1;
-    const currentQty = existing ? (parseFloat(existing.qty) || 0) : 0;
-    const newQty = currentQty + step;
-
-    if (newQty > prod.stock) return alert(`⚠️ Stock insuficiente (${prod.stock} ${prod.unit_type}).`);
-
-    if (existing) setCashierCart(cashierCart.map(i => i.id === prod.id ? { ...i, qty: newQty } : i));
-    else setCashierCart([...cashierCart, { ...prod, qty: step, price_per_unit: prod.price_per_unit }]);
+    if (existing) {
+      setSearchQueryCashier('');
+      return;
+    }
+    const initialQty = prod.unit_type === 'kg' ? 0 : 1;
+    if (initialQty > 0 && initialQty > prod.stock) {
+      return alert(`⚠️ Stock insuficiente (${prod.stock} ${prod.unit_type}).`);
+    }
+    setCashierCart([...cashierCart, { ...prod, qty: initialQty, price_per_unit: prod.price_per_unit }]);
     setSearchQueryCashier('');
   };
 
-  const getCashierTotal = () => cashierCart.reduce((acc, i) => acc + (i.price_per_unit * (parseFloat(i.qty) || 0)), 0).toFixed(2);
+  const getCashierTotal = () => cashierCart.reduce((acc, i) => {
+    const raw = parseFloat(String(i.qty).replace(',', '.')) || 0;
+    const qtyInKgOrUnits = i.unit_type === 'kg' ? raw / 1000 : raw;
+    return acc + (i.price_per_unit * qtyInKgOrUnits);
+  }, 0).toFixed(2);
 
   const getRequiredCash = () => {
     const total = parseFloat(getCashierTotal()) || 0;
@@ -783,6 +830,29 @@ export default function App() {
   const handleFinalizeSale = async () => {
     if (!cashStatus.is_open) return alert('⚠️ Abrí la caja antes de procesar ventas.');
     if (cashierCart.length === 0) return alert('Ticket de caja vacío');
+    for (const item of cashierCart) {
+      const qNum = parseFloat(String(item.qty).replace(',', '.')) || 0;
+      if (item.unit_type === 'kg') {
+        const kgVal = qNum / 1000;
+        if (kgVal <= 0) {
+          return alert(`Ingresá el peso de ${item.name}`);
+        }
+        const prod = products.find(p => p.id === item.id);
+        const maxStock = prod ? prod.stock : 999;
+        if (kgVal > maxStock) {
+          return alert(`Stock insuficiente. Disponible: ${maxStock} kg`);
+        }
+      } else {
+        if (qNum <= 0) {
+          return alert(`Ingresá la cantidad de ${item.name}`);
+        }
+        const prod = products.find(p => p.id === item.id);
+        const maxStock = prod ? prod.stock : 999;
+        if (qNum > maxStock) {
+          return alert(`Stock insuficiente. Disponible: ${maxStock}`);
+        }
+      }
+    }
     const total = parseFloat(getCashierTotal());
     let cash = 0, mp = 0;
 
@@ -802,7 +872,11 @@ export default function App() {
       setLoading(true);
       await finalizeSale({
         presale_id: selectedPreSaleId,
-        items: cashierCart.map(i => ({ product_id: i.id, quantity: parseFloat(i.qty) || 0 })),
+        items: cashierCart.map(i => {
+          const raw = parseFloat(String(i.qty).replace(',', '.')) || 0;
+          const finalQty = i.unit_type === 'kg' ? raw / 1000 : raw;
+          return { product_id: i.id, quantity: finalQty };
+        }),
         total_amount: total,
         amount_cash: cash,
         amount_mp: mp,
@@ -936,7 +1010,7 @@ export default function App() {
 
   const handleRoleChange = async (user, newRole) => {
     if (user.email?.toLowerCase() === 'admin@fiambreria.com') {
-      return alert('SolidSnake es el Admin Maestro y no puede ser degradado.');
+      return alert('SolidSnake erige el Admin Maestro y no puede ser degradado.');
     }
     try {
       setLoading(true);
@@ -1073,27 +1147,44 @@ return (
 
             <Text style={styles.subSectionTitle}>Comanda de Pre-venta:</Text>
             {vendorCart.length === 0 ? <Text style={styles.emptyText}>Sin productos seleccionados</Text> : (
-              vendorCart.map(i => (
-                <View key={i.id} style={styles.cartRow}>
-                  <Text style={{ flex: 1, fontWeight: 'bold' }}>{i.name}</Text>
+              vendorCart.map(i => {
+                const rawNum = parseFloat(String(i.qty).replace(',', '.')) || 0;
+                const calcQty = i.unit_type === 'kg' ? rawNum / 1000 : rawNum;
+                return (
+                  <View key={i.id} style={styles.cartRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontWeight: 'bold' }}>{i.name}</Text>
+                      <Text style={{ fontSize: 11, color: '#666' }}>{formatMoney(i.price_per_unit)} / {i.unit_type}</Text>
+                    </View>
 
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <TouchableOpacity style={styles.qtyBtn} onPress={() => updateVendorCartQty(i.id, -1)}>
-                      <Text style={{ color: '#fff', fontWeight: 'bold' }}>-</Text>
-                    </TouchableOpacity>
+                    {i.unit_type === 'kg' ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <View style={{ alignItems: 'flex-end', marginRight: 6 }}>
+                          <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#555' }}>Peso (gramos)</Text>
+                          <TextInput style={styles.inputSmall} keyboardType="numeric" value={String(i.qty)} onChangeText={(val) => updateVendorCartDirectQty(i.id, val)} />
+                        </View>
+                        <Text style={{ fontSize: 11, marginRight: 8, color: '#444' }}>g</Text>
+                      </View>
+                    ) : (
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <TouchableOpacity style={styles.qtyBtn} onPress={() => updateVendorCartQty(i.id, -1)}>
+                          <Text style={{ color: '#fff', fontWeight: 'bold' }}>-</Text>
+                        </TouchableOpacity>
 
-                    <TextInput style={styles.inputSmall} keyboardType="numeric" value={String(i.qty)} onChangeText={(val) => updateVendorCartDirectQty(i.id, val)} />
+                        <TextInput style={styles.inputSmall} keyboardType="numeric" value={String(i.qty)} onChangeText={(val) => updateVendorCartDirectQty(i.id, val)} />
 
-                    <TouchableOpacity style={styles.qtyBtn} onPress={() => updateVendorCartQty(i.id, 1)}>
-                      <Text style={{ color: '#fff', fontWeight: 'bold' }}>+</Text>
-                    </TouchableOpacity>
+                        <TouchableOpacity style={styles.qtyBtn} onPress={() => updateVendorCartQty(i.id, 1)}>
+                          <Text style={{ color: '#fff', fontWeight: 'bold' }}>+</Text>
+                        </TouchableOpacity>
 
-                    <Text style={{ fontSize: 11, marginLeft: 4, marginRight: 8, color: '#444' }}>{i.unit_type}</Text>
+                        <Text style={{ fontSize: 11, marginLeft: 4, marginRight: 8, color: '#444' }}>{i.unit_type}</Text>
+                      </View>
+                    )}
+
+                    <Text style={{ fontWeight: 'bold' }}>{formatMoney(i.price_per_unit * calcQty)}</Text>
                   </View>
-
-                  <Text style={{ fontWeight: 'bold' }}>{formatMoney((i.price_per_unit) * (parseFloat(i.qty) || 0))}</Text>
-                </View>
-              ))
+                );
+              })
             )}
 
             <TouchableOpacity style={styles.buttonPrimary} onPress={handleGeneratePreSale} disabled={loading}>
@@ -1215,18 +1306,37 @@ return (
                 )}
 
                 <Text style={styles.subSectionTitle}>Edición de Ticket:</Text>
-                {cashierCart.map(i => (
-                  <View key={i.id} style={styles.cartRow}>
-                    <Text style={{ flex: 1, fontWeight: 'bold' }}>{i.name}</Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                      <TouchableOpacity style={styles.qtyBtn} onPress={() => updateCashierCartQty(i.id, -1)}><Text style={{ color: '#fff', fontWeight: 'bold' }}>-</Text></TouchableOpacity>
-                      <TextInput style={styles.inputSmall} keyboardType="numeric" value={String(i.qty)} onChangeText={(val) => updateCashierCartDirectQty(i.id, val)} />
-                      <TouchableOpacity style={styles.qtyBtn} onPress={() => updateCashierCartQty(i.id, 1)}><Text style={{ color: '#fff', fontWeight: 'bold' }}>+</Text></TouchableOpacity>
-                      <Text style={{ fontSize: 11, marginLeft: 4, marginRight: 8 }}>{i.unit_type}</Text>
+                {cashierCart.map(i => {
+                  const rawNum = parseFloat(String(i.qty).replace(',', '.')) || 0;
+                  const calcQty = i.unit_type === 'kg' ? rawNum / 1000 : rawNum;
+                  return (
+                    <View key={i.id} style={styles.cartRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontWeight: 'bold' }}>{i.name}</Text>
+                        <Text style={{ fontSize: 11, color: '#666' }}>{formatMoney(i.price_per_unit)} / {i.unit_type}</Text>
+                      </View>
+
+                      {i.unit_type === 'kg' ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <View style={{ alignItems: 'flex-end', marginRight: 6 }}>
+                            <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#555' }}>Peso (gramos)</Text>
+                            <TextInput style={styles.inputSmall} keyboardType="numeric" value={String(i.qty)} onChangeText={(val) => updateCashierCartDirectQty(i.id, val)} />
+                          </View>
+                          <Text style={{ fontSize: 11, marginRight: 8 }}>g</Text>
+                        </View>
+                      ) : (
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <TouchableOpacity style={styles.qtyBtn} onPress={() => updateCashierCartQty(i.id, -1)}><Text style={{ color: '#fff', fontWeight: 'bold' }}>-</Text></TouchableOpacity>
+                          <TextInput style={styles.inputSmall} keyboardType="numeric" value={String(i.qty)} onChangeText={(val) => updateCashierCartDirectQty(i.id, val)} />
+                          <TouchableOpacity style={styles.qtyBtn} onPress={() => updateCashierCartQty(i.id, 1)}><Text style={{ color: '#fff', fontWeight: 'bold' }}>+</Text></TouchableOpacity>
+                          <Text style={{ fontSize: 11, marginLeft: 4, marginRight: 8 }}>{i.unit_type}</Text>
+                        </View>
+                      )}
+
+                      <Text style={{ fontWeight: 'bold' }}>{formatMoney(i.price_per_unit * calcQty)}</Text>
                     </View>
-                    <Text style={{ fontWeight: 'bold' }}>{formatMoney((i.price_per_unit) * (parseFloat(i.qty) || 0))}</Text>
-                  </View>
-                ))}
+                  );
+                })}
 
                 <Text style={styles.subSectionTitle}>Método de Pago:</Text>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
