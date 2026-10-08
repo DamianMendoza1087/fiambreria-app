@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProfitability, fetchMasterProductByBarcode, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, updateIngress, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled, actOnAlert, fetchAlertHistory, updateReplenishmentPolicy , fetchBranchProductsAdmin, configureBranchProduct, removeBranchProduct } from './api';
+import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProfitability, fetchMasterProductByBarcode, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, updateIngress, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled, actOnAlert, fetchAlertHistory, updateReplenishmentPolicy , fetchBranchProductsAdmin, configureBranchProduct, removeBranchProduct, fetchLatestProductAudit } from './api';
 
 export default function App() {
   const loadBranchAdminProducts = async () => {
@@ -111,6 +111,7 @@ export default function App() {
   const [selectedAuditProd, setSelectedAuditProd] = useState(null);
   const [countedQtyInput, setCountedQtyInput] = useState('');
   const [selectedProdLots, setSelectedProdLots] = useState([]);
+  const [latestStockAudit, setLatestStockAudit] = useState(null);
 
   // Ingreso / Edición de Producto
   const [editingProductId, setEditingProductId] = useState(null);
@@ -605,20 +606,35 @@ export default function App() {
 
   const handleSelectProductForAudit = async (prod) => {
     setSelectedAuditProd(prod);
-    try { setSelectedProdLots(await fetchProductLots(prod.id, branchId || 1)); }
-    catch (e) { setSelectedProdLots([]); }
+    setCountedQtyInput('');
+    setLatestStockAudit(null);
+    try {
+      const latest = await fetchLatestProductAudit(prod.id, branchId || 1);
+      if (latest && latest.has_count === true) {
+        setLatestStockAudit(latest);
+      }
+    } catch (e) {
+      setLatestStockAudit(null);
+    }
   };
 
   const handleSaveAudit = async () => {
-    if (!selectedAuditProd || !countedQtyInput) return alert('Ingresá la cantidad contada');
+    if (!selectedAuditProd) return;
+    const cleanQty = (countedQtyInput || '').replace(',', '.');
+    const val = parseFloat(cleanQty);
+    if (!Number.isFinite(val) || val < 0) {
+      return alert('Ingresá una cantidad contada válida (número mayor o igual a 0).');
+    }
     try {
       setLoading(true);
-      const val = parseFloat(countedQtyInput.replace(',', '.'));
-      await submitStockAudit(selectedAuditProd.id, val, email, branchId || 1);
-      alert(`✅ Conteo guardado: ${val} ${selectedAuditProd.unit_type}`);
-      setSelectedAuditProd(null); setCountedQtyInput(''); setSearchQueryStock('');
+      const res = await submitStockAudit(selectedAuditProd.id, val, email, branchId || 1);
+      alert(`✅ Conteo guardado\n\nSistema: ${res.system_qty} ${selectedAuditProd.unit_type}\nContado: ${res.counted_qty} ${selectedAuditProd.unit_type}\nDiferencia: ${res.difference > 0 ? '+' : ''}${res.difference} ${selectedAuditProd.unit_type}`);
+      setSelectedAuditProd(null);
+      setLatestStockAudit(null);
+      setCountedQtyInput('');
+      setSearchQueryStock('');
       await loadInitialData();
-    } catch (e) { alert('Error guardando conteo'); }
+    } catch (e) { alert('Error guardando conteo: ' + e.message); }
     finally { setLoading(false); }
   };
 
@@ -1442,14 +1458,14 @@ return (
   </View>
 )}
 
-            <TextInput style={styles.searchInput} placeholder="🔍 Buscar producto..." value={searchQueryStock} onChangeText={setSearchQueryStock} />
+            <TextInput style={styles.searchInput} placeholder="🔍 Buscar producto para contar..." value={searchQueryStock} onChangeText={setSearchQueryStock} />
 
             {searchQueryStock.trim() !== '' && (
               <View style={styles.dropdownContainer}>
                 {filteredProductsStock.map(p => (
                   <TouchableOpacity key={p.id} style={styles.dropdownItem} onPress={() => { handleSelectProductForAudit(p); setSearchQueryStock(''); }}>
                     <Text style={{ fontWeight: 'bold' }}>{p.name}</Text>
-                    <Text style={{ color: '#666', fontSize: 11 }}>EAN: {p.barcode || 'Sin EAN'} | Stock: {p.stock} {p.unit_type}</Text>
+                    <Text style={{ color: '#666', fontSize: 11 }}>EAN: {p.barcode || 'Sin EAN'} · Producto por {p.unit_type === 'kg' ? 'peso' : 'unidad'}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -1458,7 +1474,16 @@ return (
             {selectedAuditProd && (
               <View style={{ marginTop: 15, backgroundColor: '#e9ecef', padding: 12, borderRadius: 8 }}>
                 <Text style={{ fontWeight: 'bold', fontSize: 15, color: '#007bff' }}>{selectedAuditProd.name}</Text>
-                <Text style={{ fontSize: 12, color: '#555', marginBottom: 8 }}>Stock Actual: {selectedAuditProd.stock} {selectedAuditProd.unit_type}</Text>
+                <Text style={{ fontSize: 12, color: '#555', marginBottom: 4 }}>
+                  {latestStockAudit ? (
+                    `Último control físico:\n${new Date(latestStockAudit.created_at).toLocaleString('es-AR')} · realizado por ${latestStockAudit.reported_by}`
+                  ) : (
+                    'Nunca controlado'
+                  )}
+                </Text>
+                <Text style={{ fontSize: 11, color: '#666', fontStyle: 'italic', marginBottom: 8 }}>
+                  Conteo ciego: el stock del sistema se mostrará recién después de confirmar.
+                </Text>
 
                 <TextInput style={styles.inputHighlight} placeholder={`Cantidad Conteo Real (${selectedAuditProd.unit_type})`} keyboardType="numeric" value={countedQtyInput} onChangeText={setCountedQtyInput} />
                 <TouchableOpacity style={styles.buttonSuccess} onPress={handleSaveAudit} disabled={loading}>
@@ -1569,13 +1594,6 @@ return (
               </View>
             )}
 
-            (canStock || isAdminLevel)
-            <TouchableOpacity style={[styles.navBtn, currentTab === 'catalogo' && styles.navActive]} onPress={() => handleTabChange('catalogo')}>
-              <Text style={styles.navIcon}>$</Text>
-              <Text style={styles.navText}>Precios</Text>
-            </TouchableOpacity>
-          )}
-
           {isAdminLevel && editingIngress && (
               <View style={styles.card}>
                 <Text style={styles.subSectionTitle}>Corrigiendo ingreso #{editingIngress.id}</Text>
@@ -1597,172 +1615,6 @@ return (
         )}
 
         {/* GESTIÓN DE PERMISOS GRANULARES */}
-          {/* CATALOGO / LISTA DE PRECIOS */}
-          {currentTab === 'catalogo' && (canStock || isAdminLevel) && (
-            <ScrollView style={styles.body} contentContainerStyle={styles.scrollPadding}>
-              <Text style={styles.sectionTitle}>Lista de precios</Text>
-
-              {isAdminLevel && (
-                <View style={styles.card}>
-                  <Text style={styles.subSectionTitle}>
-                    🏪 Administración · {branchName}
-                  </Text>
-
-                  <Text style={{fontSize:12,color:'#666',marginBottom:10}}>
-                    Habilitá productos, definí el precio de esta sucursal y marcá exclusivos.
-                    El stock continúa separado por sucursal.
-                  </Text>
-
-                  <TouchableOpacity
-                    style={styles.buttonPrimary}
-                    onPress={loadBranchAdminProducts}
-                    disabled={loading}
-                  >
-                    <Text style={styles.buttonText}>
-                      {loading ? 'Cargando...' : 'Administrar productos de esta sucursal'}
-                    </Text>
-                  </TouchableOpacity>
-
-                  {branchAdminProducts.length > 0 && (
-                    <>
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Buscar producto..."
-                        value={branchAdminSearch}
-                        onChangeText={setBranchAdminSearch}
-                      />
-
-                      {branchAdminProducts
-                        .filter(x =>
-                          !branchAdminSearch.trim() ||
-                          (x.name || '').toLowerCase().includes(branchAdminSearch.toLowerCase()) ||
-                          (x.barcode || '').includes(branchAdminSearch)
-                        )
-                        .slice(0, 100)
-                        .map(item => (
-                          <View
-                            key={'branch-admin-' + item.product_id}
-                            style={{
-                              paddingVertical:12,
-                              borderBottomWidth:1,
-                              borderBottomColor:'#ddd'
-                            }}
-                          >
-                            <Text style={{fontWeight:'bold'}}>
-                              {item.name}
-                            </Text>
-
-                            <Text style={{fontSize:11,color:'#666',marginBottom:7}}>
-                              Stock {branchName}: {item.stock}
-                              {item.barcode ? ' · EAN ' + item.barcode : ''}
-                            </Text>
-
-                            <TextInput
-                              style={styles.input}
-                              keyboardType="decimal-pad"
-                              placeholder="Precio de esta sucursal"
-                              value={branchPriceDrafts[item.product_id] ?? ''}
-                              onChangeText={v =>
-                                setBranchPriceDrafts(prev => ({
-                                  ...prev,
-                                  [item.product_id]: v
-                                }))
-                              }
-                            />
-
-                            <View style={{flexDirection:'row',gap:6,marginBottom:7}}>
-                              <TouchableOpacity
-                                style={[
-                                  styles.typeBtn,
-                                  item.is_available && styles.typeBtnActive
-                                ]}
-                                onPress={() =>
-                                  saveBranchProductConfig(item,{
-                                    is_available: !item.is_available
-                                  })
-                                }
-                              >
-                                <Text>
-                                  {item.is_available ? '✓ Habilitado' : '+ Habilitar'}
-                                </Text>
-                              </TouchableOpacity>
-
-                              {branchId === 2 && (
-                                <TouchableOpacity
-                                  style={[
-                                    styles.typeBtn,
-                                    item.is_exclusive && styles.typeBtnActive
-                                  ]}
-                                  onPress={() =>
-                                    saveBranchProductConfig(item,{
-                                      is_exclusive: !item.is_exclusive,
-                                      is_available: true
-                                    })
-                                  }
-                                >
-                                  <Text>
-                                    {item.is_exclusive ? '★ Exclusivo Feria' : 'Compartido'}
-                                  </Text>
-                                </TouchableOpacity>
-                              )}
-                            </View>
-
-                            <TouchableOpacity
-                              style={styles.buttonSuccess}
-                              onPress={() => saveBranchProductConfig(item)}
-                            >
-                              <Text style={styles.buttonText}>
-                                Guardar precio
-                              </Text>
-                            </TouchableOpacity>
-
-                            {item.is_available && branchId === 2 && (
-                              <TouchableOpacity
-                                style={[styles.buttonPrimary,{backgroundColor:'#6c757d'}]}
-                                onPress={() => disableBranchProduct(item)}
-                              >
-                                <Text style={styles.buttonText}>
-                                  Retirar de Feria
-                                </Text>
-                              </TouchableOpacity>
-                            )}
-                          </View>
-                        ))}
-                    </>
-                  )}
-                </View>
-              )}
-
-              <Text style={{color:'#666',marginBottom:10}}>Vista para clientes. No incluye costo, margen ni proveedor.</Text>
-              <Text style={styles.subSectionTitle}>Categoria</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:10}}>
-                {catalogCategories().map(cat => (
-                  <TouchableOpacity key={cat} style={[styles.badgeBtn,{marginRight:6},catalogCategory===cat && styles.badgeBtnActive]} onPress={()=>setCatalogCategory(cat)}>
-                    <Text>{cat}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-              <TouchableOpacity style={[styles.badgeBtn,catalogOnlyStock&&styles.badgeBtnActive,{marginBottom:12}]} onPress={()=>setCatalogOnlyStock(v=>!v)}>
-                <Text>{catalogOnlyStock?'Solo productos con stock':'Mostrar tambien sin stock'}</Text>
-              </TouchableOpacity>
-              <View style={styles.card}>
-                <Text style={{fontWeight:'bold',marginBottom:8}}>{catalogProducts().length} productos</Text>
-                {catalogProducts().slice(0,80).map(p=>(
-                  <View key={p.id} style={{paddingVertical:7,borderBottomWidth:1,borderBottomColor:'#eee',flexDirection:'row',justifyContent:'space-between'}}>
-                    <View style={{flex:1,paddingRight:10}}>
-                      <Text style={{fontWeight:'bold'}}>{p.name}</Text>
-                      <Text style={{fontSize:11,color:'#666'}}>{p.category||'Varios'}{p.brand?' - '+p.brand:''}</Text>
-                    </View>
-                    <Text style={{fontWeight:'bold'}}>{formatMoney(p.price_per_unit)}</Text>
-                  </View>
-                ))}
-              </View>
-              <TouchableOpacity style={styles.buttonPrimary} onPress={exportCatalogPDF}><Text style={styles.buttonText}>Generar / compartir PDF</Text></TouchableOpacity>
-              <TouchableOpacity style={styles.buttonSuccess} onPress={exportCatalogExcel}><Text style={styles.buttonText}>Generar / compartir Excel</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.buttonCamera,{marginTop:10}]} onPress={shareCatalogText}><Text style={styles.buttonText}>Compartir por WhatsApp / texto</Text></TouchableOpacity>
-            </ScrollView>
-          )}
-
         {currentTab === 'permisos' && isAdminLevel && (
           <ScrollView contentContainerStyle={styles.scrollPadding}>
             <Text style={styles.sectionTitle}>👥 Permisos por Módulo y Roles</Text>
