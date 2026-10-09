@@ -1508,29 +1508,42 @@ export default function App() {
     setShowPromotionAdmin(true);
   };
 
-  const openEditPromotionModal = (promo) => {
-    setEditingPromotionId(promo.id);
-    setPromoFormName(promo.name || '');
-    setPromoFormDesc(promo.description || '');
-    setPromoFormEnabled(promo.is_active ?? true);
-    
-    const itemsMapped = (promo.items || []).map(i => ({
-      product_id: i.product_id,
-      name: i.product_name || i.name,
-      unit_type: i.unit_type || 'unid',
-      included_qty: i.included_qty
-    }));
-    setPromoFormItems(itemsMapped);
+  const openEditPromotionModal = async (promo) => {
+    try {
+      setLoading(true);
+      setEditingPromotionId(promo.id);
 
-    const b1 = (promo.branches || []).find(b => b.branch_id === 1);
-    setPromoFormPriceB1(b1 && b1.price != null ? String(b1.price) : '');
-    setPromoFormEnabledB1(b1 ? !!b1.is_enabled : true);
+      const [detB1, detB2] = await Promise.all([
+        fetchPromotionDetail(promo.id, 1).catch(() => null),
+        fetchPromotionDetail(promo.id, 2).catch(() => null)
+      ]);
 
-    const b2 = (promo.branches || []).find(b => b.branch_id === 2);
-    setPromoFormPriceB2(b2 && b2.price != null ? String(b2.price) : '');
-    setPromoFormEnabledB2(b2 ? !!b2.is_enabled : true);
+      const baseDetail = detB1 || detB2 || promo;
 
-    setShowPromotionAdmin(true);
+      setPromoFormName(baseDetail.name || '');
+      setPromoFormDesc(baseDetail.description || '');
+      setPromoFormEnabled(baseDetail.active ?? true);
+
+      const itemsMapped = (baseDetail.items || []).map(i => ({
+        product_id: i.product_id,
+        name: i.product_name || i.name,
+        unit_type: i.unit_type || 'unid',
+        included_qty: i.included_qty
+      }));
+      setPromoFormItems(itemsMapped);
+
+      setPromoFormPriceB1(detB1 && detB1.promo_price != null ? String(detB1.promo_price) : '');
+      setPromoFormEnabledB1(detB1 ? !!detB1.enabled : true);
+
+      setPromoFormPriceB2(detB2 && detB2.promo_price != null ? String(detB2.promo_price) : '');
+      setPromoFormEnabledB2(detB2 ? !!detB2.enabled : true);
+
+      setShowPromotionAdmin(true);
+    } catch (e) {
+      alert(e.message || 'Error al abrir editor de promoción');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const addPromoItemToDraft = () => {
@@ -1572,21 +1585,24 @@ export default function App() {
     const payload = {
       name: promoFormName.trim(),
       description: promoFormDesc.trim() || null,
-      is_active: promoFormEnabled,
-      items: promoFormItems.map(i => ({
+      active: promoFormEnabled,
+      created_by: email,
+      items: promoFormItems.map((i, index) => ({
         product_id: i.product_id,
-        included_qty: i.included_qty
+        included_qty: Number(i.included_qty),
+        unit_type: i.unit_type || 'unid',
+        sort_order: index
       })),
-      branches: [
+      branch_configs: [
         {
           branch_id: 1,
-          price: promoFormPriceB1 !== '' ? p1 : 0,
-          is_enabled: promoFormEnabledB1
+          promo_price: p1,
+          enabled: promoFormEnabledB1
         },
         {
           branch_id: 2,
-          price: promoFormPriceB2 !== '' ? p2 : 0,
-          is_enabled: promoFormEnabledB2
+          promo_price: p2,
+          enabled: promoFormEnabledB2
         }
       ]
     };
@@ -2108,10 +2124,10 @@ return (
                 {!selectedPromotion ? (
                   <>
                     <Text style={styles.subSectionTitle}>🎁 Promociones activas ({branchName})</Text>
-                    {promotions.length === 0 ? (
+                    {promotions.filter(p => p.active === true && p.enabled === true).length === 0 ? (
                       <Text style={styles.emptyText}>No hay promociones activas en esta sucursal.</Text>
                     ) : (
-                      promotions.map(promo => {
+                      promotions.filter(p => p.active === true && p.enabled === true).map(promo => {
                         const promoPrice = promo.promo_price ?? 0;
                         return (
                           <TouchableOpacity key={promo.id} style={[styles.card, { borderWidth: 1, borderColor: '#6f42c1' }]} onPress={() => handleSelectPromotionForSale(promo)}>
@@ -3231,13 +3247,31 @@ return (
                 </TouchableOpacity>
               </View>
 
-              <Text style={{ fontWeight: 'bold', marginTop: 8, marginBottom: 4 }}>Precios por Sucursal:</Text>
+              <Text style={{ fontWeight: 'bold', marginTop: 8, marginBottom: 4 }}>Precios y Habilitación por Sucursal:</Text>
               
               <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#555' }}>Sucursal 1 (Fiambrería Local)</Text>
               <TextInput style={styles.input} placeholder="Precio promoción Sucursal 1" keyboardType="numeric" value={promoFormPriceB1} onChangeText={setPromoFormPriceB1} />
+              
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+                <TouchableOpacity 
+                  style={[styles.typeBtn, promoFormEnabledB1 && { backgroundColor: '#28a745' }]} 
+                  onPress={() => setPromoFormEnabledB1(!promoFormEnabledB1)}
+                >
+                  <Text style={{ color: '#fff', fontWeight: 'bold' }}>{promoFormEnabledB1 ? 'Sucursal 1 Habilitada' : 'Sucursal 1 Deshabilitada'}</Text>
+                </TouchableOpacity>
+              </View>
 
               <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#555' }}>Sucursal 2 (Feria Damyale)</Text>
               <TextInput style={styles.input} placeholder="Precio promoción Sucursal 2" keyboardType="numeric" value={promoFormPriceB2} onChangeText={setPromoFormPriceB2} />
+
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+                <TouchableOpacity 
+                  style={[styles.typeBtn, promoFormEnabledB2 && { backgroundColor: '#28a745' }]} 
+                  onPress={() => setPromoFormEnabledB2(!promoFormEnabledB2)}
+                >
+                  <Text style={{ color: '#fff', fontWeight: 'bold' }}>{promoFormEnabledB2 ? 'Sucursal 2 Habilitada' : 'Sucursal 2 Deshabilitada'}</Text>
+                </TouchableOpacity>
+              </View>
 
               <TouchableOpacity style={[styles.buttonSuccess, { marginTop: 15 }]} onPress={handleSavePromotion} disabled={loading}>
                 <Text style={styles.buttonText}>💾 Guardar Promoción</Text>
