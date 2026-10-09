@@ -635,7 +635,7 @@ export default function App() {
     setEditIngressQty(String(item.quantity ?? ""));
     setEditIngressCost(String(item.unit_cost ?? item.cost_price ?? ""));
     setEditIngressSupplier(item.supplier || "");
-    setEditIngressLot(item.lot_code ?? item.lot_number || "");
+    setEditIngressLot(item.lot_code ?? (item.lot_number || ""));
     setEditIngressExpiration(item.expiration_date || "");
     setEditIngressReason("");
   };
@@ -3456,7 +3456,7 @@ return (
                         const unitVal = item.unit_type || 'unid';
                         const costVal = formatMoney(item.unit_cost ?? item.cost_price ?? 0);
                         const supplierVal = item.supplier || '-';
-                        const lotVal = item.lot_code ?? item.lot_number || '-';
+                        const lotVal = item.lot_code ?? (item.lot_number || '-');
                         const expVal = item.expiration_date || '-';
                         const dateValRaw = item.received_at || item.created_at;
                         const dateVal = dateValRaw ? new Date(dateValRaw).toLocaleString('es-AR') : '-';
