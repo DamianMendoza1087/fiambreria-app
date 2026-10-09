@@ -125,6 +125,33 @@ export const finalizeSale = async (saleData, branchId = 1) => {
   return await res.json();
 };
 
+export const fetchSalesHistory = async (
+  branchId = 1,
+  {
+    dateFrom = null,
+    dateTo = null,
+    search = null,
+    limit = 100
+  } = {}
+) => {
+  const q = new URLSearchParams();
+  q.set("branch_id", String(branchId));
+  if (dateFrom) q.set("date_from", dateFrom);
+  if (dateTo) q.set("date_to", dateTo);
+  if (search) q.set("search", search);
+  q.set("limit", String(limit));
+
+  const res = await fetch(`${API_URL}/sales/history?${q.toString()}`);
+  if (!res.ok) throw new Error("Error al obtener historial de ventas");
+  return await res.json();
+};
+
+export const fetchSaleDetail = async (saleId, branchId = 1) => {
+  const res = await fetch(`${API_URL}/sales/${saleId}?branch_id=${branchId}`);
+  if (!res.ok) throw new Error("Error al obtener comprobante de venta");
+  return await res.json();
+};
+
 export const fetchCashSessionStatus = async (branchId = 1) => {
   const res = await fetch(`${API_URL}/cash/status?branch_id=${branchId}`);
   if (!res.ok) throw new Error("Error al consultar estado de caja");
@@ -382,4 +409,3 @@ export const removeBranchProduct = async (branchId, productId) => {
 
   return await res.json();
 };
-                                                             
