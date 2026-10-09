@@ -5,7 +5,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import * as XLSX from 'xlsx';
-import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProfitability, fetchMasterProductByBarcode, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, updateIngress, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled, actOnAlert, fetchAlertHistory, updateReplenishmentPolicy, fetchBranchProductsAdmin, configureBranchProduct, removeBranchProduct, fetchLatestProductAudit, fetchSalesHistory, fetchSaleDetail, fetchPromotions, fetchPromotionDetail, createPromotion, updatePromotion, deletePromotion, calculatePromotion } from './api';
+import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProfitability, fetchMasterProductByBarcode, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, updateIngress, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled, actOnAlert, fetchAlertHistory, updateReplenishmentPolicy, fetchBranchProductsAdmin, configureBranchProduct, removeBranchProduct, fetchLatestProductAudit, fetchSalesHistory, fetchSaleDetail, fetchPromotions, fetchPromotionDetail, createPromotion, updatePromotion, deletePromotion, calculatePromotion, fetchIngressHistory } from './api';
 
 export default function App() {
   const loadBranchAdminProducts = async () => {
@@ -260,6 +260,13 @@ export default function App() {
   const [editIngressExpiration, setEditIngressExpiration] = useState("");
   const [editIngressReason, setEditIngressReason] = useState("");
 
+  // Estados específicos para Historial de Ingresos
+  const [showIngressHistory, setShowIngressHistory] = useState(false);
+  const [ingressHistorySearch, setIngressHistorySearch] = useState('');
+  const [ingressHistoryDateFrom, setIngressHistoryDateFrom] = useState('');
+  const [ingressHistoryDateTo, setIngressHistoryDateTo] = useState('');
+  const [ingressHistoryLoading, setIngressHistoryLoading] = useState(false);
+
 
   const loadPromotions = async () => {
     try {
@@ -323,6 +330,10 @@ export default function App() {
     else if (tabName === 'mrp') loadMRPData();
     else if (tabName === 'alertas') loadAlertsData();
     else if (tabName === 'kpis') loadKPIData();
+    else if (tabName === 'ingresos') {
+      setIngressHistory([]);
+      setShowIngressHistory(false);
+    }
     await loadInitialData();
   };
 
@@ -487,6 +498,8 @@ export default function App() {
     setCashMovements([]);
     setLastTicket(null);
     setViewingTicket(null);
+    setIngressHistory([]);
+    setShowIngressHistory(false);
   };
 
   const changeBranch = () => {
@@ -590,39 +603,47 @@ export default function App() {
 
   const loadIngressHistory = async () => {
     try {
-      setLoading(true);
-      setIngressHistory(await fetchIngresses(null, branchId || 1));
+      setIngressHistoryLoading(true);
+      const data = await fetchIngressHistory(branchId || 1, {
+        search: ingressHistorySearch.trim() || null,
+        dateFrom: ingressHistoryDateFrom || null,
+        dateTo: ingressHistoryDateTo || null,
+        limit: 100
+      });
+      setIngressHistory(data || []);
+      setShowIngressHistory(true);
     } catch (e) {
-      alert(e.message);
+      alert('Error: ' + (e.message || 'No se pudo cargar el historial'));
     } finally {
-      setLoading(false);
+      setIngressHistoryLoading(false);
     }
   };
 
   const beginIngressCorrection = (item) => {
     setEditingIngress(item);
     setEditIngressQty(String(item.quantity ?? ""));
-    setEditIngressCost(String(item.cost_price ?? ""));
+    setEditIngressCost(String(item.unit_cost ?? item.cost_price ?? ""));
     setEditIngressSupplier(item.supplier || "");
-    setEditIngressLot(item.lot_number || "");
+    setEditIngressLot(item.lot_code ?? item.lot_number || "");
     setEditIngressExpiration(item.expiration_date || "");
     setEditIngressReason("");
   };
 
   const saveIngressCorrection = async () => {
     if (!editingIngress) return;
-    if (!editIngressReason.trim()) return alert("El motivo de la correccion es obligatorio.");
+    if (!editIngressReason.trim()) return alert("El motivo de la corrección es obligatorio.");
 
     const qty = parseFloat(String(editIngressQty).replace(",", "."));
     const cost = parseFloat(String(editIngressCost).replace(",", "."));
 
     if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(cost) || cost < 0) {
-      return alert("Cantidad o costo invalido.");
+      return alert("Cantidad o costo inválido.");
     }
 
     try {
       setLoading(true);
-      await updateIngress(editingIngress.id, {
+      const targetId = editingIngress.ingress_id ?? editingIngress.id;
+      await updateIngress(targetId, {
         quantity: qty,
         cost_price: cost,
         supplier: editIngressSupplier.trim() || null,
@@ -2957,28 +2978,83 @@ return (
 
             {isAdminLevel && (
               <View style={styles.card}>
-                <Text style={styles.subSectionTitle}>Correccion auditada de ingresos</Text>
-                <Text style={{fontSize:11,color:'#666',marginBottom:8}}>Solo SuperAdmin. Toda correccion requiere un motivo.</Text>
-                <TouchableOpacity style={styles.buttonPrimary} onPress={loadIngressHistory} disabled={loading}>
-                  <Text style={styles.buttonText}>Cargar ingresos anteriores</Text>
-                </TouchableOpacity>
-                {ingressHistory.slice(0, 30).map(item => (
-                  <View key={item.id} style={{paddingVertical:9,borderBottomWidth:1,borderBottomColor:'#ddd'}}>
-                    <Text style={{fontWeight:'bold'}}>Ingreso #{item.id} - Producto #{item.product_id}</Text>
-                    <Text style={{fontSize:12}}>Cantidad: {item.quantity} - Costo: {item.cost_price}</Text>
-                    <Text style={{fontSize:11,color:'#666'}}>Proveedor: {item.supplier || '-'} - Lote: {item.lot_number || '-'}</Text>
-                    <Text style={{fontSize:11,color:'#666'}}>Vencimiento: {item.expiration_date || 'Sin vencimiento'}</Text>
-                    <TouchableOpacity style={[styles.typeBtn,{marginTop:5,alignSelf:'flex-start'}]} onPress={() => beginIngressCorrection(item)}>
-                      <Text>Corregir</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))}
+                <Text style={styles.subSectionTitle}>📋 Historial de ingresos</Text>
+                <Text style={{fontSize:11,color:'#666',marginBottom:8}}>Busca un ingreso antiguo para corregirlo fácilmente sin recordar el ID exacto.</Text>
+
+                <TextInput 
+                  style={styles.input} 
+                  placeholder="Buscar [ Producto, EAN, proveedor o lote ]" 
+                  value={ingressHistorySearch} 
+                  onChangeText={setIngressHistorySearch} 
+                />
+                <View style={{ flexDirection: 'row', marginBottom: 8 }}>
+                  <TextInput 
+                    style={[styles.input, { flex: 1, marginRight: 4, marginBottom: 0 }]} 
+                    placeholder="Desde YYYY-MM-DD" 
+                    value={ingressHistoryDateFrom} 
+                    onChangeText={setIngressHistoryDateFrom} 
+                  />
+                  <TextInput 
+                    style={[styles.input, { flex: 1, marginLeft: 4, marginBottom: 0 }]} 
+                    placeholder="Hasta YYYY-MM-DD" 
+                    value={ingressHistoryDateTo} 
+                    onChangeText={setIngressHistoryDateTo} 
+                  />
+                </View>
+
+                <View style={{ flexDirection: 'row', marginBottom: 12 }}>
+                  <TouchableOpacity style={[styles.buttonPrimary, { flex: 1, marginRight: 5, marginTop: 0 }]} onPress={loadIngressHistory} disabled={ingressHistoryLoading}>
+                    <Text style={styles.buttonText}>{ingressHistoryLoading ? 'Buscando...' : '🔎 Buscar'}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.buttonPrimary, { flex: 1, marginLeft: 5, marginTop: 0, backgroundColor: '#6c757d' }]} onPress={() => { setIngressHistorySearch(''); setIngressHistoryDateFrom(''); setIngressHistoryDateTo(''); setIngressHistory([]); setShowIngressHistory(false); }}>
+                    <Text style={styles.buttonText}>🧹 Limpiar</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {showIngressHistory && (
+                  <>
+                    {ingressHistory.length === 0 ? (
+                      <Text style={{ textAlign: 'center', color: '#888', fontStyle: 'italic', padding: 15 }}>No se encontraron ingresos.</Text>
+                    ) : (
+                      ingressHistory.map(item => {
+                        const recId = item.ingress_id ?? item.id;
+                        const prodNameStr = item.product_name || item.name || `Producto #${item.product_id}`;
+                        const eanVal = item.barcode || '-';
+                        const qtyVal = item.quantity ?? '-';
+                        const unitVal = item.unit_type || 'unid';
+                        const costVal = formatMoney(item.unit_cost ?? item.cost_price ?? 0);
+                        const supplierVal = item.supplier || '-';
+                        const lotVal = item.lot_code ?? item.lot_number || '-';
+                        const expVal = item.expiration_date || '-';
+                        const dateVal = item.received_at || item.created_at || '-';
+
+                        return (
+                          <View key={recId} style={{ backgroundColor: '#f8f9fa', padding: 12, borderRadius: 8, marginBottom: 10, borderWidth: 1, borderColor: '#dee2e6' }}>
+                            <Text style={{ fontWeight: 'bold', fontSize: 15, color: '#222', marginBottom: 2 }}>{prodNameStr}</Text>
+                            <Text style={{ fontSize: 12, color: '#555' }}>EAN: {eanVal}</Text>
+                            <Text style={{ fontSize: 12, color: '#555' }}>Ingreso #{recId}</Text>
+                            <Text style={{ fontSize: 12, marginTop: 4 }}>Cantidad: {qtyVal} {unitVal}</Text>
+                            <Text style={{ fontSize: 12 }}>Costo: {costVal}</Text>
+                            <Text style={{ fontSize: 12 }}>Proveedor: {supplierVal}</Text>
+                            <Text style={{ fontSize: 12 }}>Lote: {lotVal}</Text>
+                            <Text style={{ fontSize: 12 }}>Vencimiento: {expVal}</Text>
+                            <Text style={{ fontSize: 12 }}>Ingreso: {dateVal}</Text>
+
+                            <TouchableOpacity style={[styles.buttonPrimary, { backgroundColor: '#fd7e14', marginTop: 8 }]} onPress={() => beginIngressCorrection(item)}>
+                              <Text style={styles.buttonText}>✏️ Corregir ingreso</Text>
+                            </TouchableOpacity>
+                          </View>
+                        );
+                      })
+                    )}
+                  </>
+                )}
               </View>
             )}
 
           {isAdminLevel && editingIngress && (
               <View style={styles.card}>
-                <Text style={styles.subSectionTitle}>Corrigiendo ingreso #{editingIngress.id}</Text>
+                <Text style={styles.subSectionTitle}>Corrigiendo ingreso #{editingIngress.ingress_id ?? editingIngress.id}</Text>
                 <TextInput style={styles.input} placeholder="Cantidad" keyboardType="decimal-pad" value={editIngressQty} onChangeText={setEditIngressQty}/>
                 <TextInput style={styles.input} placeholder="Costo" keyboardType="decimal-pad" value={editIngressCost} onChangeText={setEditIngressCost}/>
                 <TextInput style={styles.input} placeholder="Proveedor" value={editIngressSupplier} onChangeText={setEditIngressSupplier}/>
