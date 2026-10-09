@@ -95,6 +95,12 @@ export default function App() {
   const [branchAdminSearch, setBranchAdminSearch] = useState('');
   const [branchPriceDrafts, setBranchPriceDrafts] = useState({});
 
+  // Estados nuevos para el Listado de Stock y Precios en Inventario
+  const [showStockList, setShowStockList] = useState(false);
+  const [stockListSearch, setStockListSearch] = useState('');
+  const [stockListFilter, setStockListFilter] = useState('todos');
+  const [stockListCategory, setStockListCategory] = useState('todas');
+
 
   // Login
   const [email, setEmail] = useState('');
@@ -1094,19 +1100,19 @@ export default function App() {
 return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
-        <View>
+        <View style={styles.headerLeft}>
           <Text style={styles.headerTitle}>🍖 Fiambrería POS & MRP</Text>
           <Text style={{ color: '#ccc', fontSize: 11 }}>Usuario: {email} ({userRole.toUpperCase()})</Text>
           <Text style={styles.branchHeader}>📍 {branchName}</Text>
         </View>
-        <View style={{alignItems:'flex-end'}}>
+        <View style={styles.headerRight}>
           {isAdminLevel && (
             <TouchableOpacity onPress={changeBranch} style={styles.changeBranchBtn}>
               <Text style={styles.changeBranchText}>⇄ Cambiar sucursal</Text>
             </TouchableOpacity>
           )}
-          <TouchableOpacity onPress={handleLogout}>
-            <Text style={{ color: '#dc3545', fontWeight: 'bold', marginTop:6 }}>🚪 Salir</Text>
+          <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
+            <Text style={{ color: '#dc3545', fontWeight: 'bold', fontSize: 12 }}>🚪 Salir</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -1207,13 +1213,13 @@ return (
               </View>
             ) : (
               <>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#d4edda', padding: 12, borderRadius: 8, marginBottom: 15 }}>
-                  <View>
+                <View style={styles.cashOpenHeaderCard}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
                     <Text style={{ fontWeight: 'bold', color: '#155724' }}>🟢 CAJA ABIERTA</Text>
                     <Text style={{ fontSize: 11, color: '#155724' }}>{cashStatus.opened_by} ({cashStatus.opened_at}) | Fondo: {formatMoney(cashStatus.initial_amount)}</Text>
                   </View>
-                  <TouchableOpacity style={{ backgroundColor: '#dc3545', padding: 8, borderRadius: 6 }} onPress={() => setShowCloseModal(true)}>
-                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 11 }}>🔒 Arqueo / Cierre</Text>
+                  <TouchableOpacity style={styles.arqueoBtnStyle} onPress={() => setShowCloseModal(true)}>
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 11, textAlign: 'center' }}>🔒 Arqueo / Cierre</Text>
                   </TouchableOpacity>
                 </View>
 
@@ -1234,9 +1240,27 @@ return (
 
                 <View style={styles.card}>
                   <Text style={styles.subSectionTitle}>💸 Caja chica / Egresos</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:8}}>
-                    {['PROVEEDOR','SERVICIOS','EMPLEADO','COMPRA_MENOR','OPERATIVO','OTRO','RETIRO_DUENO'].map(c=><TouchableOpacity key={c} style={[styles.typeBtn,{marginRight:6},cashMovementCategory===c&&{backgroundColor:'#dc3545'}]} onPress={()=>setCashMovementCategory(c)}><Text style={{fontSize:11,color:cashMovementCategory===c?'#fff':'#333'}}>{c.replaceAll('_',' ')}</Text></TouchableOpacity>)}
-                  </ScrollView>
+                  <View style={styles.wrapButtonsRow}>
+                    {[
+                      ['PROVEEDOR', 'Proveedor'],
+                      ['SERVICIOS', 'Servicios'],
+                      ['EMPLEADO', 'Empleado'],
+                      ['COMPRA_MENOR', 'Compra menor'],
+                      ['OPERATIVO', 'Operativo'],
+                      ['OTRO', 'Otro'],
+                      ['RETIRO_DUENO', 'Retiro dueño']
+                    ].map(([c, label]) => (
+                      <TouchableOpacity 
+                        key={c} 
+                        style={[styles.wrapBtnItem, cashMovementCategory === c && { backgroundColor: '#dc3545', borderColor: '#bd2130' }]} 
+                        onPress={() => setCashMovementCategory(c)}
+                      >
+                        <Text style={{ fontSize: 11, color: cashMovementCategory === c ? '#fff' : '#333', fontWeight: 'bold', textAlign: 'center' }}>
+                          {label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
                   <TextInput style={styles.input} placeholder="Concepto / detalle" value={cashMovementConcept} onChangeText={setCashMovementConcept} />
                   <TextInput style={styles.input} placeholder="Monto ($)" keyboardType="decimal-pad" value={cashMovementAmount} onChangeText={setCashMovementAmount} />
                   {cashMovementCategory==='PROVEEDOR' && <TextInput style={styles.input} placeholder="Proveedor" value={cashMovementSupplier} onChangeText={setCashMovementSupplier} />}
@@ -1251,9 +1275,26 @@ return (
                   {!lossProductId && lossSearch.trim().length>1 && <View style={styles.dropdownContainer}>{activeProducts.filter(p=>p.name.toLowerCase().includes(lossSearch.toLowerCase())).slice(0,8).map(p=><TouchableOpacity key={p.id} style={styles.dropdownItem} onPress={()=>selectLossProduct(p)}><Text style={{fontWeight:'bold'}}>{p.name}</Text><Text style={{fontSize:11}}>Stock: {p.stock} {p.unit_type}</Text></TouchableOpacity>)}</View>}
                   {lossProductId && <Text style={{fontSize:12,color:'#28a745',marginBottom:8}}>✓ Producto seleccionado</Text>}
                   <TextInput style={styles.input} placeholder="Cantidad perdida (admite 0,100)" keyboardType="decimal-pad" value={lossQty} onChangeText={setLossQty} />
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:8}}>
-                    {['MERMA_CORTE','VENCIMIENTO','ROTURA','DIFERENCIA_INVENTARIO','CONSUMO_INTERNO','OTRO'].map(r=><TouchableOpacity key={r} style={[styles.typeBtn,{marginRight:6},lossReason===r&&{backgroundColor:'#ffc107'}]} onPress={()=>setLossReason(r)}><Text style={{fontSize:11,fontWeight:'bold'}}>{r.replaceAll('_',' ')}</Text></TouchableOpacity>)}
-                  </ScrollView>
+                  <View style={styles.wrapButtonsRow}>
+                    {[
+                      ['MERMA_CORTE', 'Merma corte'],
+                      ['VENCIMIENTO', 'Vencimiento'],
+                      ['ROTURA', 'Rotura'],
+                      ['DIFERENCIA_INVENTARIO', 'Diferencia inv.'],
+                      ['CONSUMO_INTERNO', 'Consumo int.'],
+                      ['OTRO', 'Otro']
+                    ].map(([r, label]) => (
+                      <TouchableOpacity 
+                        key={r} 
+                        style={[styles.wrapBtnItem, lossReason === r && { backgroundColor: '#ffc107', borderColor: '#d39e00' }]} 
+                        onPress={() => setLossReason(r)}
+                      >
+                        <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#333', textAlign: 'center' }}>
+                          {label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
                   {lossLots.length>0 && <><Text style={{fontSize:11,fontWeight:'bold'}}>Lote específico (opcional; vacío = FEFO)</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:8}}><TouchableOpacity style={[styles.typeBtn,{marginRight:6},!lossLotId&&{backgroundColor:'#007bff'}]} onPress={()=>setLossLotId(null)}><Text style={{color:!lossLotId?'#fff':'#333'}}>FEFO</Text></TouchableOpacity>{lossLots.map(l=><TouchableOpacity key={l.id} style={[styles.typeBtn,{marginRight:6},lossLotId===l.id&&{backgroundColor:'#007bff'}]} onPress={()=>setLossLotId(l.id)}><Text style={{color:lossLotId===l.id?'#fff':'#333'}}>{l.lot_number} ({l.current_qty})</Text></TouchableOpacity>)}</ScrollView></>}
                   <TouchableOpacity style={styles.buttonDanger} onPress={handleStockLoss} disabled={loading}><Text style={styles.buttonText}>Registrar merma / pérdida</Text></TouchableOpacity>
                 </View>
@@ -1632,6 +1673,108 @@ return (
         {currentTab === 'inventario' && (canStock || isAdminLevel) && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>📦 Control FEFO e Inventario</Text>
+
+            {/* SECCIÓN NUEVA: Listados / Control de inventario */}
+            <View style={styles.card}>
+              <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#333', marginBottom: 8 }}>📋 Listados / Control de inventario</Text>
+              <TouchableOpacity style={styles.buttonPrimary} onPress={() => setShowStockList(!showStockList)}>
+                <Text style={styles.buttonText}>{showStockList ? '📋 Ocultar listado de stock y precios' : '📋 Ver listado de stock y precios'}</Text>
+              </TouchableOpacity>
+
+              {showStockList && (() => {
+                const currentBranchLabel = `Sucursal: ${branchName}`;
+                const allCats = ['todas', ...new Set(products.map(p => p.category || 'Varios'))];
+                
+                const filteredList = products.filter(p => {
+                  const matchSearch = p.name.toLowerCase().includes(stockListSearch.toLowerCase()) || (p.barcode && p.barcode.includes(stockListSearch));
+                  const matchCat = stockListCategory === 'todas' || (p.category || 'Varios') === stockListCategory;
+                  
+                  const stk = Number(p.stock || 0);
+                  const minStk = Number(p.min_stock || p.critical_stock || 0);
+                  const isCrit = minStk > 0 ? stk <= minStk : false;
+
+                  let matchFilter = true;
+                  if (stockListFilter === 'con_stock') matchFilter = stk > 0;
+                  else if (stockListFilter === 'sin_stock') matchFilter = stk <= 0;
+                  else if (stockListFilter === 'critico') matchFilter = isCrit;
+
+                  return matchSearch && matchCat && matchFilter;
+                });
+
+                const totalProds = products.length;
+                const totalConStock = products.filter(p => Number(p.stock || 0) > 0).length;
+                const totalSinStock = products.filter(p => Number(p.stock || 0) <= 0).length;
+                const totalCriticos = products.filter(p => {
+                  const stk = Number(p.stock || 0);
+                  const minStk = Number(p.min_stock || p.critical_stock || 0);
+                  return minStk > 0 ? stk <= minStk : false;
+                }).length;
+
+                return (
+                  <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 10 }}>
+                    <Text style={{ fontWeight: 'bold', color: '#007bff', marginBottom: 6 }}>{currentBranchLabel}</Text>
+                    
+                    {/* Resumen */}
+                    <View style={{ backgroundColor: '#f8f9fa', padding: 8, borderRadius: 6, marginBottom: 8 }}>
+                      <Text style={{ fontSize: 11, color: '#333' }}>Productos: {totalProds} | Con stock: {totalConStock} | Sin stock: {totalSinStock} | Críticos: {totalCriticos}</Text>
+                    </View>
+
+                    {/* Filtros de búsqueda y estados */}
+                    <TextInput style={styles.searchInput} placeholder="Buscar producto..." value={stockListSearch} onChangeText={setStockListSearch} />
+                    
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 6 }}>
+                      {[
+                        ['todos', 'Todos'],
+                        ['con_stock', 'Con stock'],
+                        ['sin_stock', 'Sin stock'],
+                        ['critico', 'Stock crítico']
+                      ].map(([fKey, fLabel]) => (
+                        <TouchableOpacity 
+                          key={fKey} 
+                          style={[styles.typeBtn, { marginRight: 6, paddingHorizontal: 10 }, stockListFilter === fKey && styles.typeBtnActive]} 
+                          onPress={() => setStockListFilter(fKey)}
+                        >
+                          <Text style={{ fontSize: 11, color: stockListFilter === fKey ? '#fff' : '#333', fontWeight: 'bold' }}>{fLabel}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+
+                    {/* Filtro de categorías */}
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+                      {allCats.map(cat => (
+                        <TouchableOpacity 
+                          key={cat} 
+                          style={[styles.typeBtn, { marginRight: 6, backgroundColor: '#e2e3e5' }, stockListCategory === cat && { backgroundColor: '#6c757d' }]} 
+                          onPress={() => setStockListCategory(cat)}
+                        >
+                          <Text style={{ fontSize: 10, color: stockListCategory === cat ? '#fff' : '#333', fontWeight: 'bold' }}>{cat}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+
+                    {/* Botón de Exportación con texto condicional / deshabilitado */}
+                    <TouchableOpacity style={[styles.buttonPrimary, { backgroundColor: '#6c757d', marginBottom: 10 }]} disabled={true}>
+                      <Text style={styles.buttonText}>📤 Compartir listado (PDF / Excel se habilitarán en la siguiente integración)</Text>
+                    </TouchableOpacity>
+
+                    {/* Lista real de stock y precios */}
+                    {filteredList.length === 0 ? (
+                      <Text style={{ fontStyle: 'italic', color: '#888', textAlign: 'center', padding: 10 }}>No se encontraron productos.</Text>
+                    ) : (
+                      filteredList.map(item => (
+                        <View key={item.id} style={{ padding: 8, borderBottomWidth: 1, borderBottomColor: '#eee', backgroundColor: '#fff' }}>
+                          <Text style={{ fontWeight: 'bold', fontSize: 13, color: '#222' }}>{item.name}</Text>
+                          <Text style={{ fontSize: 11, color: '#555' }}>EAN: {item.barcode || 'Sin EAN'} | Categoría: {item.category || 'Varios'}</Text>
+                          <Text style={{ fontSize: 11, color: '#555' }}>Stock actual: {item.stock} {item.unit_type}</Text>
+                          <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#28a745' }}>Precio venta: {formatMoney(item.branch_price ?? item.price_per_unit)}</Text>
+                        </View>
+                      ))
+                    )}
+                  </View>
+                );
+              })()}
+            </View>
+
             <TouchableOpacity style={styles.buttonCamera} onPress={() => toggleCamera('stock')}>
               <Text style={styles.buttonText}>{showCamera && cameraTarget === 'stock' ? '📷 Cerrar Escáner' : '📷 Escanear EAN del Producto'}</Text>
             </TouchableOpacity>
@@ -2085,11 +2228,14 @@ return (
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#1a1a1a', paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight || 25 : 0 },
-  header: { backgroundColor: '#1a1a1a', padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  headerTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  branchHeader: { color:'#7CFC98', fontSize:13, fontWeight:'bold', marginTop:4 },
-  changeBranchBtn: { backgroundColor:'#343a40', paddingHorizontal:10, paddingVertical:6, borderRadius:7 },
-  changeBranchText: { color:'#fff', fontSize:11, fontWeight:'bold' },
+  header: { backgroundColor: '#1a1a1a', padding: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap' },
+  headerLeft: { flex: 1, minWidth: 180, marginRight: 8, marginBottom: 4 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' },
+  headerTitle: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  branchHeader: { color:'#7CFC98', fontSize:12, fontWeight:'bold', marginTop:2 },
+  changeBranchBtn: { backgroundColor:'#343a40', paddingHorizontal:8, paddingVertical:4, borderRadius:6, marginRight:6, marginBottom:2 },
+  changeBranchText: { color:'#fff', fontSize:10, fontWeight:'bold' },
+  logoutBtn: { backgroundColor: '#2a2a2a', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, marginBottom: 2 },
   branchSelectScreen: { flex:1, backgroundColor:'#f4f6f8', padding:24, justifyContent:'center', alignItems:'stretch' },
   branchSelectTitle: { fontSize:28, fontWeight:'bold', textAlign:'center', marginBottom:8, color:'#222' },
   branchSelectSubtitle: { fontSize:15, textAlign:'center', color:'#666', marginBottom:28 },
@@ -2118,7 +2264,7 @@ const styles = StyleSheet.create({
   buttonCamera: { backgroundColor: '#6f42c1', padding: 12, borderRadius: 8, alignItems: 'center', marginBottom: 10 },
   buttonSuccess: { backgroundColor: '#28a745', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 10 },
   buttonDanger: { backgroundColor: '#dc3545', padding: 8, borderRadius: 6, alignItems: 'center' },
-  buttonText: { color: '#fff', fontWeight: 'bold' },
+  buttonText: { color: '#fff', fontWeight: 'bold', textAlign: 'center' },
   cameraContainer: { height: 200, borderRadius: 10, overflow: 'hidden', marginBottom: 15 },
   cartRow: { backgroundColor: '#fff', padding: 10, borderRadius: 8, flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
   totalBox: { backgroundColor: '#fff', padding: 15, borderRadius: 8, flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 2, borderTopColor: '#28a745', marginTop: 10 },
@@ -2142,5 +2288,9 @@ const styles = StyleSheet.create({
   navBtn: { paddingHorizontal: 14, paddingVertical: 6, marginHorizontal: 4, borderRadius: 8, alignItems: 'center', backgroundColor: '#f8f9fa', borderWidth: 1, borderColor: '#eee' },
   navActive: { backgroundColor: '#007bff', borderColor: '#0056b3' },
   navIcon: { fontSize: 16, marginBottom: 2 },
-  navText: { color: '#333', fontWeight: 'bold', fontSize: 11 }
+  navText: { color: '#333', fontWeight: 'bold', fontSize: 11 },
+  cashOpenHeaderCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#d4edda', padding: 10, borderRadius: 8, marginBottom: 15, flexWrap: 'wrap' },
+  arqueoBtnStyle: { backgroundColor: '#dc3545', padding: 8, borderRadius: 6, marginTop: 4 },
+  wrapButtonsRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 8, marginHorizontal: -3 },
+  wrapBtnItem: { flexBasis: '31%', flexGrow: 1, margin: 3, padding: 8, borderWidth: 1, borderColor: '#ccc', borderRadius: 8, alignItems: 'center', backgroundColor: '#e9ecef', justifyContent: 'center' }
 });
