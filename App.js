@@ -5,7 +5,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import * as XLSX from 'xlsx';
-import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProfitability, fetchMasterProductByBarcode, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, updateIngress, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled, actOnAlert, fetchAlertHistory, updateReplenishmentPolicy , fetchBranchProductsAdmin, configureBranchProduct, removeBranchProduct, fetchLatestProductAudit } from './api';
+import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProfitability, fetchMasterProductByBarcode, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, updateIngress, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled, actOnAlert, fetchAlertHistory, updateReplenishmentPolicy, fetchBranchProductsAdmin, configureBranchProduct, removeBranchProduct, fetchLatestProductAudit, fetchSalesHistory, fetchSaleDetail } from './api';
 
 export default function App() {
   const loadBranchAdminProducts = async () => {
@@ -156,6 +156,15 @@ export default function App() {
   const [paymentMethod, setPaymentMethod] = useState('Efectivo');
   const [amountMP, setAmountMP] = useState('');
   const [cashTendered, setCashTendered] = useState('');
+
+  // TICKET / COMPROBANTE & HISTORIAL DE VENTAS
+  const [lastTicket, setLastTicket] = useState(null);
+  const [viewingTicket, setViewingTicket] = useState(null);
+  const [showSalesHistoryModal, setShowSalesHistoryModal] = useState(false);
+  const [salesHistoryList, setSalesHistoryList] = useState([]);
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyDateFrom, setHistoryDateFrom] = useState('');
+  const [historyDateTo, setHistoryDateTo] = useState('');
 
   // CAJA
   const [cashStatus, setCashStatus] = useState({ is_open: false });
@@ -428,6 +437,8 @@ export default function App() {
     setCashierCart([]);
     setSelectedPreSaleId(null);
     setCashMovements([]);
+    setLastTicket(null);
+    setViewingTicket(null);
   };
 
   const changeBranch = () => {
@@ -866,38 +877,264 @@ export default function App() {
     }
     const total = parseFloat(getCashierTotal());
     let cash = 0, mp = 0;
+    let cashReceivedVal = null;
+    let changeAmountVal = 0.0;
 
     if (paymentMethod === 'Efectivo') {
       cash = total;
-      if ((parseFloat(cashTendered) || 0) < total) return alert(`⚠️ Dinero insuficiente`);
+      const tenderedNum = parseFloat(cashTendered) || 0;
+      if (tenderedNum < total) return alert(`⚠️ Dinero insuficiente`);
+      cashReceivedVal = tenderedNum;
+      changeAmountVal = parseFloat(getChangeDue()) || 0.0;
     } else if (paymentMethod === 'Mercado Pago') {
       mp = total;
+      cashReceivedVal = null;
+      changeAmountVal = 0.0;
     } else {
       mp = parseFloat(amountMP) || 0;
       if (mp > total) return alert(`⚠️ Monto MP supera el total`);
       cash = total - mp;
-      if (cash > 0 && (parseFloat(cashTendered) || 0) < cash) return alert(`⚠️ Dinero insuficiente en efectivo`);
+      if (cash > 0) {
+        const tenderedNum = parseFloat(cashTendered) || 0;
+        if (tenderedNum < cash) return alert(`⚠️ Dinero insuficiente en efectivo`);
+        cashReceivedVal = tenderedNum;
+        changeAmountVal = parseFloat(getChangeDue()) || 0.0;
+      } else {
+        cashReceivedVal = null;
+        changeAmountVal = 0.0;
+      }
     }
+
+    const currentCartSnapshot = [...cashierCart];
+    const currentSoldBy = email;
+    const currentPaymentMethod = paymentMethod;
+    const currentCash = cash;
+    const currentMp = mp;
 
     try {
       setLoading(true);
-      await finalizeSale({
+      const saleResult = await finalizeSale({
         presale_id: selectedPreSaleId,
         items: cashierCart.map(i => ({
           product_id: i.id,
           quantity: parseFloat(String(i.qty).replace(',', '.')) || 0
         })),
         total_amount: total,
-        amount_cash: cash,
-        amount_mp: mp,
-        payment_method: paymentMethod,
-        sold_by: email
+        amount_cash: currentCash,
+        amount_mp: currentMp,
+        payment_method: currentPaymentMethod,
+        sold_by: currentSoldBy,
+        cash_received: cashReceivedVal,
+        change_amount: changeAmountVal
       }, branchId || 1);
-      alert(`💳 Venta procesada con éxito!\nVuelto: ${formatMoney(getChangeDue())}`);
-      setSelectedPreSaleId(null); setCashierCart([]); setAmountMP(''); setCashTendered('');
+
+      let fetchedDetail = null;
+      if (saleResult && saleResult.sale_id) {
+        try {
+          fetchedDetail = await fetchSaleDetail(saleResult.sale_id, branchId || 1);
+        } catch (eDetail) {
+          fetchedDetail = null;
+        }
+      }
+
+      const finalTicketObj = fetchedDetail || {
+        id: saleResult?.sale_id || 'N/A',
+        branch_id: branchId || 1,
+        created_at: new Date().toISOString(),
+        total_amount: total,
+        amount_cash: currentCash,
+        amount_mp: currentMp,
+        payment_method: currentPaymentMethod,
+        cash_received: cashReceivedVal,
+        change_amount: changeAmountVal,
+        sold_by: currentSoldBy,
+        items: currentCartSnapshot.map(i => ({
+          product_id: i.id,
+          product_name: i.name,
+          quantity: parseFloat(String(i.qty).replace(',', '.')) || 0,
+          unit_price: i.price_per_unit,
+          subtotal: i.price_per_unit * (parseFloat(String(i.qty).replace(',', '.')) || 0)
+        }))
+      };
+
+      setLastTicket(finalTicketObj);
+      setSelectedPreSaleId(null);
+      setCashierCart([]);
+      setAmountMP('');
+      setCashTendered('');
       await loadInitialData();
-    } catch (e) { alert('Error procesando venta'); }
-    finally { setLoading(false); }
+    } catch (e) {
+      alert('Error procesando venta');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const generateTicketHtml = (ticket) => {
+    if (!ticket) return '';
+    const bizName = ticket.branch_id === 2 ? 'Feria Damyale' : 'Fiambrería Local';
+    const dateStr = ticket.created_at ? new Date(ticket.created_at).toLocaleString('es-AR') : '';
+    const itemsHtml = (ticket.items || []).map(item => {
+      const qNum = Number(item.quantity || 0);
+      const isKg = item.unit_type === 'kg' || String(item.quantity).includes(',') || (item.product_name && item.product_name.toLowerCase().includes('kg'));
+      const qFormatted = isKg ? `${qNum.toFixed(3).replace('.', ',')} kg` : `${qNum} unid`;
+      const sub = Number(item.subtotal ?? ((item.unit_price || 0) * qNum));
+      return `
+        <div class="item-row">
+          <div class="item-name">${item.product_name || item.name || 'Producto'}</div>
+          <div class="item-details">
+            <span>${qFormatted} x ${formatMoney(item.unit_price)}</span>
+            <span style="font-weight: bold;">${formatMoney(sub)}</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    let paymentHtml = `<div class="p-method">Forma de pago: ${ticket.payment_method || 'Efectivo'}</div>`;
+    if (ticket.payment_method === 'Efectivo') {
+      paymentHtml += `
+        <div class="pay-detail">Pagado en efectivo: ${formatMoney(ticket.amount_cash || ticket.total_amount)}</div>
+        ${ticket.cash_received != null ? `<div class="pay-detail">Efectivo recibido: ${formatMoney(ticket.cash_received)}</div>` : ''}
+        ${ticket.change_amount != null && ticket.change_amount > 0 ? `<div class="pay-detail">Vuelto: ${formatMoney(ticket.change_amount)}</div>` : ''}
+      `;
+    } else if (ticket.payment_method === 'Mercado Pago') {
+      paymentHtml += `<div class="pay-detail">Mercado Pago: ${formatMoney(ticket.amount_mp || ticket.total_amount)}</div>`;
+    } else if (ticket.payment_method === 'Mixto') {
+      paymentHtml += `
+        <div class="pay-detail">Mercado Pago: ${formatMoney(ticket.amount_mp)}</div>
+        <div class="pay-detail">Efectivo: ${formatMoney(ticket.amount_cash)}</div>
+        ${ticket.cash_received != null ? `<div class="pay-detail">Efectivo recibido: ${formatMoney(ticket.cash_received)}</div>` : ''}
+        ${ticket.change_amount != null && ticket.change_amount > 0 ? `<div class="pay-detail">Vuelto: ${formatMoney(ticket.change_amount)}</div>` : ''}
+      `;
+    }
+
+    return `
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: 'Courier New', Courier, monospace; width: 100%; margin: 0; padding: 10px; color: #000; font-size: 12px; }
+            .center { text-align: center; }
+            .title { font-size: 16px; font-weight: bold; margin-bottom: 4px; }
+            .subtitle { font-size: 13px; font-weight: bold; margin-bottom: 8px; }
+            .info { margin-bottom: 10px; border-bottom: 1px dashed #000; padding-bottom: 8px; }
+            .item-row { margin-bottom: 6px; }
+            .item-name { font-weight: bold; }
+            .item-details { display: flex; justify-content: space-between; font-size: 11px; }
+            .total-section { border-top: 1px dashed #000; margin-top: 10px; padding-top: 6px; font-size: 14px; font-weight: bold; display: flex; justify-content: space-between; }
+            .payment-section { margin-top: 8px; border-top: 1px dashed #000; padding-top: 6px; font-size: 11px; }
+            .p-method { font-weight: bold; margin-bottom: 2px; }
+            .pay-detail { margin-left: 6px; }
+            .footer { text-align: center; margin-top: 15px; font-size: 11px; border-top: 1px dashed #000; padding-top: 8px; }
+          </style>
+        </head>
+        <body>
+          <div class="center">
+            <div class="title">${bizName}</div>
+            <div class="subtitle">COMPROBANTE DE VENTA</div>
+          </div>
+          <div class="info">
+            <div>Venta N°: ${ticket.id}</div>
+            <div>Fecha: ${dateStr}</div>
+            <div>Sucursal: ${bizName}</div>
+            <div>Vendedor: ${ticket.sold_by || 'Mostrador'}</div>
+          </div>
+          <div class="items-list">
+            ${itemsHtml}
+          </div>
+          <div class="total-section">
+            <span>TOTAL:</span>
+            <span>${formatMoney(ticket.total_amount)}</span>
+          </div>
+          <div class="payment-section">
+            ${paymentHtml}
+          </div>
+          <div class="footer">
+            <div>Comprobante de venta - No válido como factura fiscal</div>
+            <div style="margin-top: 4px; font-weight: bold;">Gracias por su compra</div>
+          </div>
+        </body>
+      </html>
+    `;
+  };
+
+  const handleShareTicketPdf = async (ticketToShare) => {
+    if (!ticketToShare) return;
+    try {
+      setLoading(true);
+      const html = generateTicketHtml(ticketToShare);
+      const { uri } = await Print.printToFileAsync({ html });
+      const filename = `ticket_venta_${ticketToShare.id}.pdf`;
+      const newUri = FileSystem.documentDirectory + filename;
+      await FileSystem.moveAsync({ from: uri, to: newUri });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(newUri, { mimeType: 'application/pdf', dialogTitle: `Comprobante Venta #${ticketToShare.id}` });
+      } else {
+        alert('La función de compartir no está disponible en este dispositivo.');
+      }
+    } catch (e) {
+      alert('No se pudo compartir el comprobante');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePrintTicketPdf = async (ticketToPrint) => {
+    if (!ticketToPrint) return;
+    try {
+      setLoading(true);
+      const html = generateTicketHtml(ticketToPrint);
+      await Print.printAsync({ html });
+    } catch (e) {
+      alert('No se pudo imprimir el comprobante');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOpenSalesHistory = async () => {
+    setShowSalesHistoryModal(true);
+    await searchSalesHistory();
+  };
+
+  const searchSalesHistory = async () => {
+    try {
+      setLoading(true);
+      const options = {
+        limit: 100
+      };
+      if (historyDateFrom.trim()) options.dateFrom = historyDateFrom.trim();
+      if (historyDateTo.trim()) options.dateTo = historyDateTo.trim();
+      if (historySearch.trim()) options.search = historySearch.trim();
+
+      const res = await fetchSalesHistory(branchId || 1, options);
+      setSalesHistoryList(res || []);
+    } catch (e) {
+      alert('No se pudo cargar el historial de ventas');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSelectHistoricalSale = async (saleSummary) => {
+    try {
+      setLoading(true);
+      const detail = await fetchSaleDetail(saleSummary.id, branchId || 1);
+      setViewingTicket(detail);
+      setShowSalesHistoryModal(false);
+    } catch (e) {
+      alert('No se pudo cargar el comprobante');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleNewSale = () => {
+    setLastTicket(null);
+    setViewingTicket(null);
+    setSelectedPreSaleId(null);
+    setCashierCart([]);
   };
 
   const handleCashMovement = async () => {
@@ -1316,8 +1553,87 @@ return (
       </View>
 
       <View style={styles.body}>
+        {/* VISTA DE TICKET RECIÉN VENDIDO O TICKET SELECCIONADO */}
+        {(lastTicket || viewingTicket) && (() => {
+          const ticketToShow = viewingTicket || lastTicket;
+          const isHistorical = !!viewingTicket;
+          return (
+            <ScrollView contentContainerStyle={styles.scrollPadding}>
+              <View style={[styles.card, { borderWidth: 2, borderColor: '#28a745' }]}>
+                <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#28a745', textAlign: 'center', marginBottom: 4 }}>
+                  {isHistorical ? `🧾 Comprobante Histórico #${ticketToShow.id}` : `✅ Venta #${ticketToShow.id} realizada`}
+                </Text>
+                <Text style={{ fontSize: 11, color: '#666', textAlign: 'center', marginBottom: 12 }}>
+                  {ticketToShow.created_at ? new Date(ticketToShow.created_at).toLocaleString('es-AR') : ''} · {ticketToShow.branch_id === 2 ? 'Feria Damyale' : 'Fiambrería Local'}
+                </Text>
+
+                <View style={{ borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#eee', paddingVertical: 10, marginBottom: 12 }}>
+                  <Text style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 6 }}>Detalle de productos:</Text>
+                  {(ticketToShow.items || []).map((item, idx) => {
+                    const qNum = Number(item.quantity || 0);
+                    const isKg = item.unit_type === 'kg' || String(item.quantity).includes(',') || (item.product_name && item.product_name.toLowerCase().includes('kg'));
+                    const qFormatted = isKg ? `${qNum.toFixed(3).replace('.', ',')} kg` : `${qNum} unid`;
+                    const sub = Number(item.subtotal ?? ((item.unit_price || 0) * qNum));
+                    return (
+                      <View key={idx} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
+                        <View style={{ flex: 1, marginRight: 8 }}>
+                          <Text style={{ fontWeight: 'bold', fontSize: 12 }}>{item.product_name || item.name || 'Producto'}</Text>
+                          <Text style={{ fontSize: 11, color: '#555' }}>{qFormatted} x {formatMoney(item.unit_price)}</Text>
+                        </View>
+                        <Text style={{ fontWeight: 'bold', fontSize: 12 }}>{formatMoney(sub)}</Text>
+                      </View>
+                    );
+                  })}
+                </View>
+
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <Text style={{ fontWeight: 'bold', fontSize: 15 }}>TOTAL:</Text>
+                  <Text style={{ fontWeight: 'bold', fontSize: 16, color: '#28a745' }}>{formatMoney(ticketToShow.total_amount)}</Text>
+                </View>
+
+                <View style={{ backgroundColor: '#f8f9fa', padding: 8, borderRadius: 6, marginBottom: 15 }}>
+                  <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#333' }}>Forma de pago: {ticketToShow.payment_method || 'Efectivo'}</Text>
+                  {ticketToShow.payment_method === 'Efectivo' && (
+                    <>
+                      {ticketToShow.cash_received != null && <Text style={{ fontSize: 11, color: '#555' }}>Efectivo recibido: {formatMoney(ticketToShow.cash_received)}</Text>}
+                      {ticketToShow.change_amount != null && ticketToShow.change_amount > 0 && <Text style={{ fontSize: 11, color: '#28a745' }}>Vuelto: {formatMoney(ticketToShow.change_amount)}</Text>}
+                    </>
+                  )}
+                  {ticketToShow.payment_method === 'Mixto' && (
+                    <>
+                      <Text style={{ fontSize: 11, color: '#555' }}>Mercado Pago: {formatMoney(ticketToShow.amount_mp)}</Text>
+                      <Text style={{ fontSize: 11, color: '#555' }}>Efectivo: {formatMoney(ticketToShow.amount_cash)}</Text>
+                      {ticketToShow.cash_received != null && <Text style={{ fontSize: 11, color: '#555' }}>Efectivo recibido: {formatMoney(ticketToShow.cash_received)}</Text>}
+                      {ticketToShow.change_amount != null && ticketToShow.change_amount > 0 && <Text style={{ fontSize: 11, color: '#28a745' }}>Vuelto: {formatMoney(ticketToShow.change_amount)}</Text>}
+                    </>
+                  )}
+                  <Text style={{ fontSize: 11, color: '#555' }}>Vendedor: {ticketToShow.sold_by || 'Mostrador'}</Text>
+                </View>
+
+                <TouchableOpacity style={[styles.buttonPrimary, { backgroundColor: '#007bff', marginBottom: 8 }]} onPress={() => handleShareTicketPdf(ticketToShow)}>
+                  <Text style={styles.buttonText}>📤 Compartir / Descargar PDF</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={[styles.buttonPrimary, { backgroundColor: '#6f42c1', marginBottom: 8 }]} onPress={() => handlePrintTicketPdf(ticketToShow)}>
+                  <Text style={styles.buttonText}>🖨️ Imprimir ticket</Text>
+                </TouchableOpacity>
+
+                {isHistorical ? (
+                  <TouchableOpacity style={[styles.buttonPrimary, { backgroundColor: '#6c757d' }]} onPress={() => setViewingTicket(null)}>
+                    <Text style={styles.buttonText}>← Volver</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity style={[styles.buttonSuccess, { backgroundColor: '#28a745' }]} onPress={handleNewSale}>
+                    <Text style={styles.buttonText}>➕ Nueva venta</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </ScrollView>
+          );
+        })()}
+
         {/* PRE-VENTA */}
-        {currentTab === 'preventa' && (canPreventa || isAdminLevel) && (
+        {currentTab === 'preventa' && !lastTicket && !viewingTicket && (canPreventa || isAdminLevel) && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>🛒 Pre-venta (Mostrador)</Text>
 
@@ -1397,9 +1713,14 @@ return (
         )}
 
         {/* CAJA */}
-        {currentTab === 'caja' && (canCaja || isAdminLevel) && (
+        {currentTab === 'caja' && !lastTicket && !viewingTicket && (canCaja || isAdminLevel) && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
-            <Text style={styles.sectionTitle}>💳 Caja y Cobro</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <Text style={styles.sectionTitle}>💳 Caja y Cobro</Text>
+              <TouchableOpacity style={{ backgroundColor: '#6c757d', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 }} onPress={handleOpenSalesHistory}>
+                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 11 }}>🧾 Historial / Reimprimir tickets</Text>
+              </TouchableOpacity>
+            </View>
 
             {!cashStatus.is_open ? (
               <View style={styles.card}>
@@ -2342,6 +2663,46 @@ return (
         )}
       </View>
 
+      {/* MODAL DE HISTORIAL DE VENTAS */}
+      {showSalesHistoryModal && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <Text style={{ fontSize: 18, fontWeight: 'bold' }}>🧾 Historial de Ventas</Text>
+              <TouchableOpacity onPress={() => setShowSalesHistoryModal(false)}>
+                <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#dc3545' }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TextInput style={styles.input} placeholder="Buscar por N°, producto o vendedor..." value={historySearch} onChangeText={setHistorySearch} />
+            <View style={{ flexDirection: 'row', marginBottom: 8 }}>
+              <TextInput style={[styles.input, { flex: 1, marginRight: 4, marginBottom: 0 }]} placeholder="Desde YYYY-MM-DD" value={historyDateFrom} onChangeText={setHistoryDateFrom} />
+              <TextInput style={[styles.input, { flex: 1, marginLeft: 4, marginBottom: 0 }]} placeholder="Hasta YYYY-MM-DD" value={historyDateTo} onChangeText={setHistoryDateTo} />
+            </View>
+            <TouchableOpacity style={[styles.buttonPrimary, { marginTop: 0, marginBottom: 10 }]} onPress={searchSalesHistory}>
+              <Text style={styles.buttonText}>🔍 Buscar</Text>
+            </TouchableOpacity>
+
+            <ScrollView style={{ maxHeight: 300 }}>
+              {salesHistoryList.length === 0 ? (
+                <Text style={{ textAlign: 'center', color: '#888', padding: 20 }}>No se encontraron ventas.</Text>
+              ) : (
+                salesHistoryList.map(s => (
+                  <TouchableOpacity key={s.id} style={{ padding: 10, borderBottomWidth: 1, borderBottomColor: '#eee', backgroundColor: '#fff' }} onPress={() => handleSelectHistoricalSale(s)}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Text style={{ fontWeight: 'bold' }}>Venta #{s.id}</Text>
+                      <Text style={{ fontWeight: 'bold', color: '#28a745' }}>{formatMoney(s.total_amount)}</Text>
+                    </View>
+                    <Text style={{ fontSize: 11, color: '#666' }}>{s.created_at ? new Date(s.created_at).toLocaleString('es-AR') : ''} · {s.payment_method} · {s.sold_by || 'Mostrador'}</Text>
+                    <Text style={{ fontSize: 10, color: '#007bff', marginTop: 2 }}>Items: {s.items_count ?? '-'} — Tocar para ver / reimprimir</Text>
+                  </TouchableOpacity>
+                ))
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      )}
+
       {/* NAVBAR NAVEGABLE COMPLETO */}
       <View style={styles.navbarWrapper}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.navbarContent}>
@@ -2487,5 +2848,7 @@ const styles = StyleSheet.create({
   arqueoBtnStyle: { backgroundColor: '#dc3545', padding: 8, borderRadius: 6, marginTop: 4 },
   wrapButtonsRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 8, marginHorizontal: -3 },
   wrapBtnItem: { flexBasis: '31%', flexGrow: 1, margin: 3, padding: 8, borderWidth: 1, borderColor: '#ccc', borderRadius: 8, alignItems: 'center', backgroundColor: '#e9ecef', justifyContent: 'center' },
-  exportBtnItem: { flexBasis: '48%', flexGrow: 1, margin: 3, padding: 10, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }
+  exportBtnItem: { flexBasis: '48%', flexGrow: 1, margin: 3, padding: 10, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  modalOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20, zIndex: 1000 },
+  modalContent: { backgroundColor: '#fff', borderRadius: 10, padding: 15, maxHeight: '80%' }
 });
