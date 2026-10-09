@@ -917,7 +917,8 @@ export default function App() {
         presale_id: selectedPreSaleId,
         items: cashierCart.map(i => ({
           product_id: i.id,
-          quantity: parseFloat(String(i.qty).replace(',', '.')) || 0
+          quantity: parseFloat(String(i.qty).replace(',', '.')) || 0,
+          unit_type: i.unit_type
         })),
         total_amount: total,
         amount_cash: currentCash,
@@ -952,6 +953,7 @@ export default function App() {
           product_id: i.id,
           product_name: i.name,
           quantity: parseFloat(String(i.qty).replace(',', '.')) || 0,
+          unit_type: i.unit_type,
           unit_price: i.price_per_unit,
           subtotal: i.price_per_unit * (parseFloat(String(i.qty).replace(',', '.')) || 0)
         }))
@@ -976,7 +978,7 @@ export default function App() {
     const dateStr = ticket.created_at ? new Date(ticket.created_at).toLocaleString('es-AR') : '';
     const itemsHtml = (ticket.items || []).map(item => {
       const qNum = Number(item.quantity || 0);
-      const isKg = item.unit_type === 'kg' || String(item.quantity).includes(',') || (item.product_name && item.product_name.toLowerCase().includes('kg'));
+      const isKg = item.unit_type === 'kg';
       const qFormatted = isKg ? `${qNum.toFixed(3).replace('.', ',')} kg` : `${qNum} unid`;
       const sub = Number(item.subtotal ?? ((item.unit_price || 0) * qNum));
       return `
@@ -1571,7 +1573,7 @@ return (
                   <Text style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 6 }}>Detalle de productos:</Text>
                   {(ticketToShow.items || []).map((item, idx) => {
                     const qNum = Number(item.quantity || 0);
-                    const isKg = item.unit_type === 'kg' || String(item.quantity).includes(',') || (item.product_name && item.product_name.toLowerCase().includes('kg'));
+                    const isKg = item.unit_type === 'kg';
                     const qFormatted = isKg ? `${qNum.toFixed(3).replace('.', ',')} kg` : `${qNum} unid`;
                     const sub = Number(item.subtotal ?? ((item.unit_price || 0) * qNum));
                     return (
