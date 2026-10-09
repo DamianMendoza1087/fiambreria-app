@@ -1649,13 +1649,17 @@ export default function App() {
     if (!promoFormName.trim()) return alert('El nombre es obligatorio');
     if (promoFormItems.length === 0) return alert('Agregá al menos un componente');
 
+    if (!promoFormEnabledB1 && !promoFormEnabledB2) {
+      return alert('La promoción debe estar habilitada al menos en una sucursal.');
+    }
+
     const p1 = parseFloat(String(promoFormPriceB1 || '').replace(',', '.'));
     const p2 = parseFloat(String(promoFormPriceB2 || '').replace(',', '.'));
 
-    if (promoFormEnabledB1 && (!Number.isFinite(p1) || p1 < 0)) {
+    if (promoFormEnabledB1 && (!Number.isFinite(p1) || p1 <= 0)) {
       return alert('Precio de promoción inválido para Sucursal 1 habilitada');
     }
-    if (promoFormEnabledB2 && (!Number.isFinite(p2) || p2 < 0)) {
+    if (promoFormEnabledB2 && (!Number.isFinite(p2) || p2 <= 0)) {
       return alert('Precio de promoción inválido para Sucursal 2 habilitada');
     }
 
@@ -1919,6 +1923,39 @@ export default function App() {
   };
 
   // Funciones de Cartelería
+  const renderVisualGraphicPreview = (visualType) => {
+    let st = { width: 70, height: 70, backgroundColor: '#e0e0e0', borderWidth: 3, borderColor: '#000' };
+    switch (visualType) {
+      case 'horma_redonda':
+        st = { width: 80, height: 80, borderRadius: 40, backgroundColor: '#ffb300', borderWidth: 3, borderColor: '#000' };
+        break;
+      case 'horma_rectangular':
+        st = { width: 90, height: 60, borderRadius: 4, backgroundColor: '#ff8f00', borderWidth: 3, borderColor: '#000' };
+        break;
+      case 'barra':
+        st = { width: 110, height: 40, borderRadius: 20, backgroundColor: '#d32f2f', borderWidth: 3, borderColor: '#000' };
+        break;
+      case 'embutido_entero':
+        st = { width: 110, height: 40, borderRadius: 20, backgroundColor: '#d32f2f', borderWidth: 3, borderColor: '#000' };
+        break;
+      case 'jamon_entero':
+        st = { width: 90, height: 50, borderRadius: 25, backgroundColor: '#d32f2f', borderWidth: 3, borderColor: '#000' };
+        break;
+      case 'botella':
+        st = { width: 35, height: 100, borderRadius: 6, backgroundColor: '#388e3c', borderWidth: 3, borderColor: '#000' };
+        break;
+      case 'paquete':
+        st = { width: 80, height: 70, borderRadius: 6, backgroundColor: '#1976d2', borderWidth: 3, borderColor: '#000' };
+        break;
+      case 'unidad':
+      case 'otro':
+      default:
+        st = { width: 70, height: 70, borderRadius: 35, backgroundColor: '#e0e0e0', borderWidth: 3, borderColor: '#000' };
+        break;
+    }
+    return <View style={{ margin: 10, alignItems: 'center', justifyContent: 'center' }}><View style={st} /></View>;
+  };
+
   const renderVisualGraphicHtml = (visualType, imageUri) => {
     if (imageUri) {
       return `<div class="visual-img-container"><img src="${imageUri}" class="visual-img" /></div>`;
@@ -2736,6 +2773,7 @@ return (
               {posterMode === 'producto' ? (
                 selectedPosterProduct ? (() => {
                   const commercial = getPosterCommercialData();
+                  const visualType = selectedPosterProduct.visual_presentation || 'unidad';
                   return (
                     <View style={{ alignItems: 'center', padding: 10 }}>
                       {posterBadge !== 'SIN_ETIQUETA' && (
@@ -2746,9 +2784,7 @@ return (
                       <Text style={{ fontSize: 20, fontWeight: '900', textAlign: 'center', textTransform: 'uppercase' }}>{selectedPosterProduct.name}</Text>
                       {selectedPosterProduct.brand ? <Text style={{ fontSize: 12, color: '#555', fontWeight: 'bold', marginTop: 2 }}>{selectedPosterProduct.brand}</Text> : null}
                       
-                      <View style={{ marginVertical: 12, padding: 15, backgroundColor: '#fff', borderRadius: 8, borderWidth: 2, borderColor: '#000', width: '80%', alignItems: 'center' }}>
-                        <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#666' }}>[ {selectedPosterProduct.visual_presentation ? selectedPosterProduct.visual_presentation.toUpperCase() : 'PIEZA / UNIDAD'} ]</Text>
-                      </View>
+                      {renderVisualGraphicPreview(visualType)}
 
                       <View style={{ backgroundColor: '#000', paddingHorizontal: 20, paddingVertical: 8, borderRadius: 8, borderWidth: 2, borderColor: '#d32f2f', alignItems: 'center' }}>
                         <Text style={{ fontSize: 26, fontWeight: '900', color: '#ffeb3b' }}>
