@@ -15,10 +15,13 @@ export default function App() {
       const data = await fetchBranchProductsAdmin(branchId);
       setBranchAdminProducts(data);
       const drafts = {};
+      const minStockDrafts = {};
       data.forEach(x => {
         drafts[x.product_id] = String(x.branch_price ?? x.base_price ?? '');
+        minStockDrafts[x.product_id] = x.minimum_stock != null ? String(x.minimum_stock) : '';
       });
       setBranchPriceDrafts(drafts);
+      setBranchMinStockDrafts(minStockDrafts);
     } catch (e) {
       alert(e.message || 'No se pudo cargar el catálogo de sucursal');
     } finally {
@@ -38,10 +41,22 @@ export default function App() {
         return;
       }
 
+      const rawMinStock = branchMinStockDrafts[item.product_id];
+      let minimumStockVal = null;
+      if (rawMinStock !== undefined && rawMinStock !== null && String(rawMinStock).trim() !== '') {
+        const parsedMin = Number(String(rawMinStock).replace(',', '.'));
+        if (!Number.isFinite(parsedMin) || parsedMin < 0) {
+          alert('Ingresá un stock mínimo válido (mayor o igual a 0)');
+          return;
+        }
+        minimumStockVal = parsedMin;
+      }
+
       await configureBranchProduct(branchId, item.product_id, {
         price_per_unit: price,
         is_available: changes.is_available ?? item.is_available,
-        is_exclusive: changes.is_exclusive ?? item.is_exclusive
+        is_exclusive: changes.is_exclusive ?? item.is_exclusive,
+        minimum_stock: minimumStockVal
       });
 
       await loadBranchAdminProducts();
@@ -107,12 +122,14 @@ export default function App() {
   const [canVerificacion, setCanVerificacion] = useState(false);
   const [canKPIs, setCanKPIs] = useState(false);
   const [canEditRecords, setCanEditRecords] = useState(false);
+  const [canCarteleria, setCanCarteleria] = useState(false);
 
   const [currentTab, setCurrentTab] = useState('preventa');
   // Administración de catálogo por sucursal
   const [branchAdminProducts, setBranchAdminProducts] = useState([]);
   const [branchAdminSearch, setBranchAdminSearch] = useState('');
   const [branchPriceDrafts, setBranchPriceDrafts] = useState({});
+  const [branchMinStockDrafts, setBranchMinStockDrafts] = useState({});
 
   // Estados nuevos para el Listado de Stock y Precios en Inventario
   const [showStockList, setShowStockList] = useState(false);
@@ -128,6 +145,8 @@ export default function App() {
   const [posterBadge, setPosterBadge] = useState('SIN_ETIQUETA');
   const [posterFormat, setPosterFormat] = useState('A4_VERTICAL');
   const [posterShowSavings, setPosterShowSavings] = useState(true);
+  const [posterKgFraction, setPosterKgFraction] = useState('1/4'); // '1/4' | '1/2' | '1' | 'custom'
+  const [posterCustomKg, setPosterCustomKg] = useState('');
 
 
   // Login
@@ -163,6 +182,7 @@ export default function App() {
   const [prodBrand, setProdBrand] = useState('');
   const [prodLotNumber, setProdLotNumber] = useState('');
   const [prodRequiresExpiration, setProdRequiresExpiration] = useState(false);
+  const [prodVisualPresentation, setProdVisualPresentation] = useState('unidad');
   const [ingressSearch, setIngressSearch] = useState('');
   const [ingressMatches, setIngressMatches] = useState([]);
 
@@ -319,6 +339,7 @@ export default function App() {
         setCanVerificacion(currentUser.can_verificacion);
         setCanKPIs(currentUser.can_kpis);
         setCanEditRecords(currentUser.can_edit_records);
+        setCanCarteleria(currentUser.can_carteleria);
       }
     } catch (e) {
       console.log('Error de sincronización:', e.message);
@@ -479,7 +500,7 @@ export default function App() {
       setCanPreventa(res.can_preventa); setCanCaja(res.can_caja); setCanStock(res.can_stock);
       setCanIngreso(res.can_ingreso); setCanAlertas(res.can_alertas); setCanRRHH(res.can_rrhh);
       setCanMRP(res.can_mrp); setCanVerificacion(res.can_verificacion); setCanKPIs(res.can_kpis);
-      setCanEditRecords(res.can_edit_records);
+      setCanEditRecords(res.can_edit_records); setCanCarteleria(res.can_carteleria);
 
       if (['masteradmin', 'superadmin'].includes(res.role || 'vendedor')) {
         setBranchId(null);
@@ -511,6 +532,8 @@ export default function App() {
     setShowIngressHistory(false);
     setSelectedPosterProduct(null);
     setSelectedPosterPromo(null);
+    setPosterKgFraction('1/4');
+    setPosterCustomKg('');
   };
 
   const changeBranch = () => {
@@ -565,6 +588,7 @@ export default function App() {
     setIngressProductId(p.id); setProdName(p.name || ''); setProdCategory(p.category || 'Varios');
     setProdBrand(p.brand || ''); setProdPrice(String(p.price_per_unit || '')); setProdSupplier(p.supplier || '');
     setProdUnitType(p.unit_type || 'unid'); setProdBarcode(p.barcode || '');
+    setProdVisualPresentation(p.visual_presentation || 'unidad');
     setProdRequiresExpiration(!!p.requires_expiration); setIngressSearch(''); setIngressMatches([]);
   };
   const lookupIngressEAN = async (code) => {
@@ -609,6 +633,7 @@ export default function App() {
     setIngressProductId(null); setProdName(''); setProdCategory(''); setProdBrand('');
     setProdCost(''); setProdPrice(''); setProdSupplier(''); setProdStock(''); setProdUnitType('unid');
     setProdBarcode(''); setProdExpirationDate(''); setProdLotNumber(''); setProdRequiresExpiration(false);
+    setProdVisualPresentation('unidad');
     setIngressSearch(''); setIngressMatches([]);
   };
 
@@ -689,8 +714,23 @@ export default function App() {
     try {
       setLoading(true); let productId=ingressProductId;
       if (!productId) {
-        const created=await createProductMaster({name:prodName.trim(),category:prodCategory.trim(),brand:prodBrand||null,barcode:prodBarcode.trim()||null,price_per_unit:price,unit_type:prodUnitType,requires_expiration:prodRequiresExpiration,replenishment_policy:'MRP',is_active:true}, branchId || 1);
+        const created=await createProductMaster({
+          name:prodName.trim(),
+          category:prodCategory.trim(),
+          brand:prodBrand||null,
+          barcode:prodBarcode.trim()||null,
+          price_per_unit:price,
+          unit_type:prodUnitType,
+          requires_expiration:prodRequiresExpiration,
+          visual_presentation: prodVisualPresentation,
+          replenishment_policy:'MRP',
+          is_active:true
+        }, branchId || 1);
         productId=created.id;
+      } else {
+        await updateProduct(productId, {
+          visual_presentation: prodVisualPresentation
+        });
       }
       await createIngress({product_id:productId,supplier:prodSupplier||null,cost_price:cost,quantity:qty,lot_number:prodLotNumber||null,expiration_date:prodRequiresExpiration?prodExpirationDate:null,received_by:email,notes:'Ingreso desde App V2'}, branchId || 1);
       alert('Ingreso y lote registrados correctamente'); resetIngressForm(); await loadInitialData();
@@ -1435,13 +1475,14 @@ export default function App() {
     setProdStock(String(prod.stock));
     setProdUnitType(prod.unit_type || 'unid');
     setProdBarcode(prod.barcode || '');
+    setProdVisualPresentation(prod.visual_presentation || 'unidad');
     setProdIsActive(prod.is_active);
     setProdExpirationDate('');
   };
 
   const handleCancelEditProduct = () => {
     setEditingProductId(null);
-    setProdName(''); setProdCost(''); setProdPrice(''); setProdSupplier(''); setProdStock(''); setProdBarcode(''); setProdExpirationDate(''); setProdUnitType('unid'); setProdIsActive(true);
+    setProdName(''); setProdCost(''); setProdPrice(''); setProdSupplier(''); setProdStock(''); setProdBarcode(''); setProdExpirationDate(''); setProdUnitType('unid'); setProdVisualPresentation('unidad'); setProdIsActive(true);
   };
 
   const handleSaveProduct = async () => {
@@ -1457,6 +1498,7 @@ export default function App() {
         unit_type: prodUnitType,
         stock: parseFloat(prodStock.replace(',', '.')),
         barcode: prodBarcode || null,
+        visual_presentation: prodVisualPresentation,
         is_active: prodIsActive,
         expiration_date: prodExpirationDate || null
       };
@@ -1610,8 +1652,11 @@ export default function App() {
     const p1 = parseFloat(String(promoFormPriceB1 || '').replace(',', '.'));
     const p2 = parseFloat(String(promoFormPriceB2 || '').replace(',', '.'));
 
-    if ((promoFormEnabledB1 && (!Number.isFinite(p1) || p1 < 0)) || (promoFormEnabledB2 && (!Number.isFinite(p2) || p2 < 0))) {
-      return alert('Precio de promoción inválido para las sucursales habilitadas');
+    if (promoFormEnabledB1 && (!Number.isFinite(p1) || p1 < 0)) {
+      return alert('Precio de promoción inválido para Sucursal 1 habilitada');
+    }
+    if (promoFormEnabledB2 && (!Number.isFinite(p2) || p2 < 0)) {
+      return alert('Precio de promoción inválido para Sucursal 2 habilitada');
     }
 
     const payload = {
@@ -1628,12 +1673,12 @@ export default function App() {
       branch_configs: [
         {
           branch_id: 1,
-          promo_price: p1,
+          promo_price: promoFormEnabledB1 ? p1 : 0,
           enabled: promoFormEnabledB1
         },
         {
           branch_id: 2,
-          promo_price: p2,
+          promo_price: promoFormEnabledB2 ? p2 : 0,
           enabled: promoFormEnabledB2
         }
       ]
@@ -1686,7 +1731,7 @@ export default function App() {
       const matchCat = stockListCategory === 'todas' || (p.category || 'Varios') === stockListCategory;
       
       const stk = Number(p.stock || 0);
-      const minStk = Number(p.min_stock || p.critical_stock || 0);
+      const minStk = Number(p.minimum_stock ?? p.min_stock ?? p.critical_stock ?? 0);
       const isCrit = minStk > 0 ? stk <= minStk : false;
 
       let matchFilter = true;
@@ -1710,7 +1755,7 @@ export default function App() {
     const totalSinStock = products.filter(p => Number(p.stock || 0) <= 0).length;
     const totalCriticos = products.filter(p => {
       const stk = Number(p.stock || 0);
-      const minStk = Number(p.min_stock || p.critical_stock || 0);
+      const minStk = Number(p.minimum_stock ?? p.min_stock ?? p.critical_stock ?? 0);
       return minStk > 0 ? stk <= minStk : false;
     }).length;
 
@@ -1890,10 +1935,16 @@ export default function App() {
         label = 'HORMA RECTANGULAR';
         break;
       case 'barra':
+        shapeClass = 'visual-bar';
+        label = 'BARRA';
+        break;
       case 'embutido_entero':
+        shapeClass = 'visual-bar';
+        label = 'EMBUTIDO ENTERO';
+        break;
       case 'jamon_entero':
         shapeClass = 'visual-bar';
-        label = 'PIEZA ENTERA';
+        label = 'JAMÓN ENTERO';
         break;
       case 'botella':
         shapeClass = 'visual-bottle';
@@ -1903,12 +1954,67 @@ export default function App() {
         shapeClass = 'visual-packet';
         label = 'PAQUETE';
         break;
+      case 'unidad':
+        shapeClass = 'visual-unit';
+        label = 'PIEZA / UNIDAD';
+        break;
       default:
         shapeClass = 'visual-unit';
         label = 'PIEZA / UNIDAD';
         break;
     }
-    return `<div class="graphic-container"><div class="${shapeClass}"></div><div class="graphic-label">[ ${label} ]</div></div>`;
+    return `<div class="graphic-container"><div class="${shapeClass}"></div></div>`;
+  };
+
+  const getPosterCommercialData = () => {
+    if (!selectedPosterProduct) return { priceDisplay: '$0.00', unitDisplay: 'UNID', subtitleDisplay: null };
+    const prod = selectedPosterProduct;
+    const basePrice = Number(prod.branch_price ?? prod.price_per_unit ?? 0);
+    const unitType = prod.unit_type;
+
+    if (unitType === 'kg') {
+      let factor = 0.25;
+      let fractionLabel = '1/4 KG';
+      if (posterKgFraction === '1/2') {
+        factor = 0.5;
+        fractionLabel = '1/2 KG';
+      } else if (posterKgFraction === '1') {
+        factor = 1.0;
+        fractionLabel = '1 KG';
+      } else if (posterKgFraction === 'custom') {
+        const cleanCustom = posterCustomKg.replace(',', '.');
+        const parsedCustom = parseFloat(cleanCustom);
+        if (Number.isFinite(parsedCustom) && parsedCustom > 0) {
+          factor = parsedCustom;
+          if (parsedCustom === 0.25) fractionLabel = '1/4 KG';
+          else if (parsedCustom === 0.5) fractionLabel = '1/2 KG';
+          else if (parsedCustom === 1.0) fractionLabel = '1 KG';
+          else if (parsedCustom === 0.3) fractionLabel = '300 G';
+          else if (parsedCustom === 0.75) fractionLabel = '750 G';
+          else if (parsedCustom > 1) {
+            fractionLabel = `${parsedCustom.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 3 })} KG`;
+          } else {
+            fractionLabel = `${Math.round(parsedCustom * 1000)} G`;
+          }
+        }
+      }
+
+      const calculatedPrice = basePrice * factor;
+      const formattedPrice = formatMoney(calculatedPrice);
+      const subPrice = `${formatMoney(basePrice)}/kg`;
+
+      return {
+        priceDisplay: formattedPrice,
+        unitDisplay: fractionLabel,
+        subtitleDisplay: subPrice
+      };
+    } else {
+      return {
+        priceDisplay: formatMoney(basePrice),
+        unitDisplay: 'UNIDAD',
+        subtitleDisplay: null
+      };
+    }
   };
 
   const generatePosterHtmlContent = () => {
@@ -1928,11 +2034,12 @@ export default function App() {
       const prod = selectedPosterProduct;
       const name = prod.name || 'PRODUCTO';
       const brand = prod.brand ? `<div class="brand">${prod.brand}</div>` : '';
-      const price = formatMoney(prod.branch_price ?? prod.price_per_unit ?? 0);
-      const unitLabel = prod.unit_type === 'kg' ? 'KG' : 'UNID';
       const visualType = prod.visual_presentation || 'unidad';
       const imgUri = prod.product_image_uri || null;
       const visualHtml = renderVisualGraphicHtml(visualType, imgUri);
+
+      const commercial = getPosterCommercialData();
+      const subPriceHtml = commercial.subtitleDisplay ? `<div class="sub-price">${commercial.subtitleDisplay}</div>` : '';
 
       contentInner = `
         ${badgeHtml}
@@ -1940,9 +2047,10 @@ export default function App() {
         ${brand}
         ${visualHtml}
         <div class="price-box">
-          <span class="price">${price}</span>
-          <span class="unit">/${unitLabel}</span>
+          <span class="price">${commercial.priceDisplay}</span>
+          <span class="unit">${commercial.unitDisplay}</span>
         </div>
+        ${subPriceHtml}
       `;
     } else {
       if (!selectedPosterPromo) return '<div class="empty-poster">Seleccioná una promoción para generar el cartel</div>';
@@ -1993,7 +2101,6 @@ export default function App() {
     else if (posterFormat === 'A4_4_POR_HOJA') repeatCount = 4;
 
     const isHorizontal = posterFormat === 'A4_HORIZONTAL';
-    const pageClass = isHorizontal ? 'page-horizontal' : 'page-vertical';
     const containerGridClass = repeatCount === 4 ? 'grid-4' : repeatCount === 2 ? 'grid-2' : 'grid-1';
 
     let postersHtml = '';
@@ -2021,7 +2128,6 @@ export default function App() {
             .promo-desc { font-size: 12px; color: #444; margin-bottom: 8px; font-style: italic; }
             
             .graphic-container { margin: 10px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-            .graphic-label { font-size: 11px; font-weight: bold; color: #666; margin-top: 4px; }
             .visual-circle { width: ${repeatCount === 4 ? '60px' : '90px'}; height: ${repeatCount === 4 ? '60px' : '90px'}; border-radius: 50%; background: #ffb300; border: 4px solid #000; box-shadow: inset -6px -6px 0px rgba(0,0,0,0.15); }
             .visual-block { width: ${repeatCount === 4 ? '80px' : '110px'}; height: ${repeatCount === 4 ? '50px' : '70px'}; background: #ff8f00; border: 4px solid #000; border-radius: 4px; }
             .visual-bar { width: ${repeatCount === 4 ? '100px' : '140px'}; height: ${repeatCount === 4 ? '35px' : '50px'}; background: #d32f2f; border: 4px solid #000; border-radius: 20px; }
@@ -2037,6 +2143,7 @@ export default function App() {
             .price-box { background: #000; color: #ffeb3b; padding: 8px 20px; border-radius: 8px; margin-top: 10px; display: inline-block; border: 3px solid #d32f2f; }
             .price { font-size: ${repeatCount === 4 ? '28px' : repeatCount === 2 ? '38px' : '52px'}; font-weight: 900; letter-spacing: -1px; }
             .unit { font-size: ${repeatCount === 4 ? '14px' : '18px'}; font-weight: bold; margin-left: 4px; color: #fff; }
+            .sub-price { font-size: ${repeatCount === 4 ? '12px' : '15px'}; font-weight: bold; color: #333; margin-top: 6px; }
 
             .savings-box { background: #000; color: #fff; padding: 8px 15px; border-radius: 8px; margin-top: 8px; border: 3px solid #28a745; width: 90%; }
             .normal-price { font-size: ${repeatCount === 4 ? '12px' : '14px'}; text-decoration: line-through; color: #ff8a80; }
@@ -2468,7 +2575,7 @@ return (
         )}
 
         {/* CARTELERÍA */}
-        {currentTab === 'carteleria' && isAdminLevel && (
+        {currentTab === 'carteleria' && (canCarteleria || isAdminLevel) && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>🪧 Cartelería Comercial</Text>
             
@@ -2539,6 +2646,35 @@ return (
               </View>
             )}
 
+            {/* Selector comercial si es producto por KG */}
+            {posterMode === 'producto' && selectedPosterProduct && selectedPosterProduct.unit_type === 'kg' && (
+              <View style={styles.card}>
+                <Text style={styles.subSectionTitle}>Precio por:</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                  {[
+                    ['1/4', '1/4 kg'],
+                    ['1/2', '1/2 kg'],
+                    ['1', '1 kg'],
+                    ['custom', 'Personalizado']
+                  ].map(([fKey, fLabel]) => (
+                    <TouchableOpacity 
+                      key={fKey} 
+                      style={[styles.typeBtn, { marginRight: 4, paddingHorizontal: 6 }, posterKgFraction === fKey && { backgroundColor: '#d32f2f', borderColor: '#b71c1c' }]} 
+                      onPress={() => setPosterKgFraction(fKey)}
+                    >
+                      <Text style={{ fontSize: 11, color: posterKgFraction === fKey ? '#fff' : '#333', fontWeight: 'bold' }}>{fLabel}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                {posterKgFraction === 'custom' && (
+                  <View style={{ marginTop: 6 }}>
+                    <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4 }}>Cantidad en kg</Text>
+                    <TextInput style={styles.inputHighlight} placeholder="Ej: 0.300 o 1.250" keyboardType="decimal-pad" value={posterCustomKg} onChangeText={setPosterCustomKg} />
+                  </View>
+                )}
+              </View>
+            )}
+
             {/* Opciones de Etiqueta y Formato */}
             <View style={styles.card}>
               <Text style={styles.subSectionTitle}>2. Etiqueta Comercial</Text>
@@ -2598,27 +2734,33 @@ return (
               <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#d32f2f', textAlign: 'center', marginBottom: 6 }}>👁️ VISTA PREVIA DEL CARTEL</Text>
               
               {posterMode === 'producto' ? (
-                selectedPosterProduct ? (
-                  <View style={{ alignItems: 'center', padding: 10 }}>
-                    {posterBadge !== 'SIN_ETIQUETA' && (
-                      <View style={{ backgroundColor: '#d32f2f', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 4, marginBottom: 8 }}>
-                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>🔥 {posterBadge} 🔥</Text>
+                selectedPosterProduct ? (() => {
+                  const commercial = getPosterCommercialData();
+                  return (
+                    <View style={{ alignItems: 'center', padding: 10 }}>
+                      {posterBadge !== 'SIN_ETIQUETA' && (
+                        <View style={{ backgroundColor: '#d32f2f', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 4, marginBottom: 8 }}>
+                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>🔥 {posterBadge} 🔥</Text>
+                        </View>
+                      )}
+                      <Text style={{ fontSize: 20, fontWeight: '900', textAlign: 'center', textTransform: 'uppercase' }}>{selectedPosterProduct.name}</Text>
+                      {selectedPosterProduct.brand ? <Text style={{ fontSize: 12, color: '#555', fontWeight: 'bold', marginTop: 2 }}>{selectedPosterProduct.brand}</Text> : null}
+                      
+                      <View style={{ marginVertical: 12, padding: 15, backgroundColor: '#fff', borderRadius: 8, borderWidth: 2, borderColor: '#000', width: '80%', alignItems: 'center' }}>
+                        <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#666' }}>[ {selectedPosterProduct.visual_presentation ? selectedPosterProduct.visual_presentation.toUpperCase() : 'PIEZA / UNIDAD'} ]</Text>
                       </View>
-                    )}
-                    <Text style={{ fontSize: 20, fontWeight: '900', textAlign: 'center', textTransform: 'uppercase' }}>{selectedPosterProduct.name}</Text>
-                    {selectedPosterProduct.brand ? <Text style={{ fontSize: 12, color: '#555', fontWeight: 'bold', marginTop: 2 }}>{selectedPosterProduct.brand}</Text> : null}
-                    
-                    <View style={{ marginVertical: 12, padding: 15, backgroundColor: '#fff', borderRadius: 8, borderWidth: 2, borderColor: '#000', width: '80%', alignItems: 'center' }}>
-                      <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#666' }}>[ {selectedPosterProduct.visual_presentation ? selectedPosterProduct.visual_presentation.toUpperCase() : 'PIEZA / UNIDAD'} ]</Text>
-                    </View>
 
-                    <View style={{ backgroundColor: '#000', paddingHorizontal: 20, paddingVertical: 8, borderRadius: 8, borderWidth: 2, borderColor: '#d32f2f' }}>
-                      <Text style={{ fontSize: 26, fontWeight: '900', color: '#ffeb3b' }}>
-                        {formatMoney(selectedPosterProduct.branch_price ?? selectedPosterProduct.price_per_unit ?? 0)} <Text style={{ fontSize: 14, color: '#fff' }}>/{selectedPosterProduct.unit_type === 'kg' ? 'KG' : 'UNID'}</Text>
-                      </Text>
+                      <View style={{ backgroundColor: '#000', paddingHorizontal: 20, paddingVertical: 8, borderRadius: 8, borderWidth: 2, borderColor: '#d32f2f', alignItems: 'center' }}>
+                        <Text style={{ fontSize: 26, fontWeight: '900', color: '#ffeb3b' }}>
+                          {commercial.priceDisplay} <Text style={{ fontSize: 14, color: '#fff' }}>/{commercial.unitDisplay}</Text>
+                        </Text>
+                      </View>
+                      {commercial.subtitleDisplay && (
+                        <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#333', marginTop: 6 }}>{commercial.subtitleDisplay}</Text>
+                      )}
                     </View>
-                  </View>
-                ) : <Text style={{ textAlign: 'center', color: '#888', fontStyle: 'italic', padding: 20 }}>Seleccioná un producto arriba</Text>
+                  );
+                })() : <Text style={{ textAlign: 'center', color: '#888', fontStyle: 'italic', padding: 20 }}>Seleccioná un producto arriba</Text>
               ) : (
                 selectedPosterPromo ? (
                   <View style={{ alignItems: 'center', padding: 10 }}>
@@ -2993,11 +3135,10 @@ return (
               <Text style={{fontWeight:'bold',fontSize:15,color:item.severity==='CRITICAL'?'#dc3545':item.severity==='IMPORTANT'?'#fd7e14':'#555'}}>{item.severity==='CRITICAL'?'🔴':item.severity==='IMPORTANT'?'🟠':'🔵'} {item.title}</Text>
               <Text style={{fontSize:12,color:'#555',marginVertical:6}}>{item.detail}</Text>
               <Text style={{fontSize:10,color:'#777'}}>Estado: {item.state||'NEW'} · Tipo: {item.type}</Text>
+              <Text style={{fontSize:10,color:'#555',fontStyle:'italic',marginTop:4}}>Recordar en 24 h oculta temporalmente la alerta. Descartar la oculta de forma permanente.</Text>
               <View style={{flexDirection:'row',flexWrap:'wrap',marginTop:8}}>
-                <TouchableOpacity style={[styles.typeBtn,{marginRight:5,marginBottom:5}]} onPress={()=>handleAlertAction(item,'SEEN')}><Text>👁 Vista</Text></TouchableOpacity>
-                <TouchableOpacity style={[styles.typeBtn,{marginRight:5,marginBottom:5}]} onPress={()=>handleAlertAction(item,'SNOOZED')}><Text>⏰ 24 h</Text></TouchableOpacity>
-                {(item.actions||[]).includes('RESOLVED') && <TouchableOpacity style={[styles.typeBtn,{marginRight:5,marginBottom:5,backgroundColor:'#28a745'}]} onPress={()=>handleAlertAction(item,'RESOLVED')}><Text style={{color:'#fff'}}>✓ Resolver</Text></TouchableOpacity>}
-                <TouchableOpacity style={[styles.typeBtn,{marginRight:5,marginBottom:5,backgroundColor:'#6c757d'}]} onPress={()=>handleAlertAction(item,'DISMISSED')}><Text style={{color:'#fff'}}>Descartar</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.typeBtn,{marginRight:5,marginBottom:5}]} onPress={()=>handleAlertAction(item,'SNOOZED')}><Text>⏰ Recordar en 24 h</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.typeBtn,{marginRight:5,marginBottom:5,backgroundColor:'#6c757d'}]} onPress={()=>handleAlertAction(item,'DISMISSED')}><Text style={{color:'#fff'}}>🗑️ Descartar</Text></TouchableOpacity>
               </View>
             </View>)}
             {showAlertHistory && <View style={styles.card}><Text style={styles.subSectionTitle}>📜 Historial auditable</Text>{alertHistory.slice(0,100).map(h=><Text key={h.id} style={{fontSize:11,paddingVertical:5,borderBottomWidth:1,borderBottomColor:'#eee'}}>{h.created_at} · {h.actor||'-'} · {h.old_state} → {h.new_state} · {h.note||''}</Text>)}</View>}
@@ -3178,10 +3319,73 @@ return (
           </ScrollView>
         )}
 
-        {/* INVENTARIO / STOCK / FEFO */}
+        {/* INVENTARIO / STOCK / FEFO / ADMINISTRACIÓN POR SUCURSAL */}
         {currentTab === 'inventario' && (canStock || isAdminLevel) && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>📦 Control FEFO e Inventario</Text>
+
+            {/* ADMINISTRACIÓN DE PRECIOS Y STOCK MÍNIMO POR SUCURSAL */}
+            <View style={styles.card}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#333' }}>⚙️ Administración por Sucursal ({branchName})</Text>
+                <TouchableOpacity style={{ backgroundColor: '#007bff', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 }} onPress={loadBranchAdminProducts}>
+                  <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 11 }}>↻ Cargar Catálogo Sucursal</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TextInput style={styles.searchInput} placeholder="Filtrar productos de sucursal..." value={branchAdminSearch} onChangeText={setBranchAdminSearch} />
+
+              <View style={{ marginTop: 10 }}>
+                {branchAdminProducts.length === 0 ? (
+                  <Text style={{ fontStyle: 'italic', color: '#888', textAlign: 'center', padding: 10 }}>Tocá en "Cargar Catálogo Sucursal" para administrar precios y stock mínimo.</Text>
+                ) : (
+                  branchAdminProducts
+                    .filter(item => (item.name || '').toLowerCase().includes(branchAdminSearch.toLowerCase()))
+                    .map(item => {
+                      const unitLabel = item.unit_type === 'kg' ? 'kg' : 'unid';
+                      return (
+                        <View key={item.product_id} style={{ padding: 10, backgroundColor: '#f8f9fa', borderRadius: 8, marginBottom: 10, borderWidth: 1, borderColor: '#dee2e6' }}>
+                          <Text style={{ fontWeight: 'bold', fontSize: 14, color: '#222' }}>{item.name}</Text>
+                          <Text style={{ fontSize: 11, color: '#555', marginBottom: 6 }}>Base: {formatMoney(item.base_price)} · Stock actual: {item.stock} {unitLabel}</Text>
+
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                            <View style={{ flex: 1, marginRight: 6 }}>
+                              <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#444' }}>Precio en sucursal ($)</Text>
+                              <TextInput 
+                                style={[styles.input, { marginBottom: 0, backgroundColor: '#fff' }]} 
+                                keyboardType="numeric" 
+                                value={String(branchPriceDrafts[item.product_id] ?? '')} 
+                                onChangeText={(val) => setBranchPriceDrafts({ ...branchPriceDrafts, [item.product_id]: val })} 
+                              />
+                            </View>
+
+                            <View style={{ flex: 1, marginLeft: 6 }}>
+                              <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#444' }}>Stock mínimo ({unitLabel})</Text>
+                              <TextInput 
+                                style={[styles.input, { marginBottom: 0, backgroundColor: '#fff' }]} 
+                                keyboardType="numeric" 
+                                placeholder="0 = sin alerta"
+                                value={String(branchMinStockDrafts[item.product_id] ?? '')} 
+                                onChangeText={(val) => setBranchMinStockDrafts({ ...branchMinStockDrafts, [item.product_id]: val })} 
+                              />
+                            </View>
+                          </View>
+                          <Text style={{ fontSize: 10, color: '#666', fontStyle: 'italic', marginBottom: 8 }}>Se genera alerta cuando el stock llega a este valor o menos. 0 = sin alerta.</Text>
+
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                            <TouchableOpacity style={[styles.buttonPrimary, { flex: 0.48, marginTop: 0, backgroundColor: '#28a745' }]} onPress={() => saveBranchProductConfig(item)} disabled={loading}>
+                              <Text style={styles.buttonText}>💾 Guardar</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={[styles.buttonDanger, { flex: 0.48 }]} onPress={() => disableBranchProduct(item)} disabled={loading}>
+                              <Text style={styles.buttonText}>Retirar de sucursal</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      );
+                    })
+                )}
+              </View>
+            </View>
 
             {/* SECCIÓN NUEVA: Listados / Control de inventario con exportación real */}
             <View style={styles.card}>
@@ -3200,7 +3404,7 @@ return (
                 const totalSinStock = products.filter(p => Number(p.stock || 0) <= 0).length;
                 const totalCriticos = products.filter(p => {
                   const stk = Number(p.stock || 0);
-                  const minStk = Number(p.min_stock || p.critical_stock || 0);
+                  const minStk = Number(p.minimum_stock ?? p.min_stock ?? p.critical_stock ?? 0);
                   return minStk > 0 ? stk <= minStk : false;
                 }).length;
 
@@ -3343,6 +3547,30 @@ return (
               <Text style={{fontSize:12,color:ingressProductId?'#28a745':'#666',marginBottom:8}}>{ingressProductId ? `✓ Producto existente #${ingressProductId}` : 'Producto nuevo / sin EAN'}</Text>
               <TextInput style={styles.input} placeholder="Nombre del producto" value={prodName} onChangeText={setProdName} editable={!ingressProductId} />
               <TextInput style={styles.input} placeholder="Marca (opcional)" value={prodBrand} onChangeText={setProdBrand} editable={!ingressProductId} />
+              
+              <Text style={{fontWeight:'bold',marginTop:8,marginBottom:4}}>Presentación para carteles</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:10}}>
+                {[
+                  ['horma_redonda', 'Horma redonda'],
+                  ['horma_rectangular', 'Horma rectangular'],
+                  ['barra', 'Barra'],
+                  ['embutido_entero', 'Embutido entero'],
+                  ['jamon_entero', 'Jamón entero'],
+                  ['botella', 'Botella'],
+                  ['paquete', 'Paquete'],
+                  ['unidad', 'Unidad / pieza'],
+                  ['otro', 'Otro']
+                ].map(([vKey, vLabel]) => (
+                  <TouchableOpacity
+                    key={vKey}
+                    style={[styles.typeBtn, { marginRight: 6, paddingHorizontal: 10 }, prodVisualPresentation === vKey && { backgroundColor: '#007bff' }]}
+                    onPress={() => setProdVisualPresentation(vKey)}
+                  >
+                    <Text style={{ fontSize: 11, color: prodVisualPresentation === vKey ? '#fff' : '#333', fontWeight: 'bold' }}>{vLabel}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
               <Text style={{fontWeight:'bold',marginTop:8,marginBottom:6}}>
                 ¿Este producto tiene vencimiento?
               </Text>
@@ -3701,6 +3929,10 @@ return (
                       <TouchableOpacity style={[styles.badgeBtn, u.can_verificacion && styles.badgeBtnActive, { width: '48%', marginBottom: 6 }]} onPress={() => handleToggleModulePermission(u, 'can_verificacion')}>
                         <Text style={{ color: u.can_verificacion ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>🔍 Arqueo {u.can_verificacion ? '✓' : '✗'}</Text>
                       </TouchableOpacity>
+
+                      <TouchableOpacity style={[styles.badgeBtn, u.can_carteleria && styles.badgeBtnActive, { width: '48%', marginBottom: 6 }]} onPress={() => handleToggleModulePermission(u, 'can_carteleria')}>
+                        <Text style={{ color: u.can_carteleria ? '#fff' : '#333', fontSize: 11, fontWeight: 'bold' }}>🪧 Cartelería {u.can_carteleria ? '✓' : '✗'}</Text>
+                      </TouchableOpacity>
                     </View>
                   </View>
               </View>
@@ -3854,7 +4086,7 @@ return (
             </TouchableOpacity>
           )}
 
-          {isAdminLevel && (
+          {(canCarteleria || isAdminLevel) && (
             <TouchableOpacity style={[styles.navBtn, currentTab === 'carteleria' && styles.navActive]} onPress={() => handleTabChange('carteleria')}>
               <Text style={styles.navIcon}>🪧</Text>
               <Text style={styles.navText}>Carteles</Text>
