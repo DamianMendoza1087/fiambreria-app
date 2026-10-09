@@ -120,6 +120,15 @@ export default function App() {
   const [stockListFilter, setStockListFilter] = useState('todos');
   const [stockListCategory, setStockListCategory] = useState('todas');
 
+  // Estados para Cartelería
+  const [posterMode, setPosterMode] = useState('producto'); // 'producto' | 'promocion'
+  const [posterProductSearch, setPosterProductSearch] = useState('');
+  const [selectedPosterProduct, setSelectedPosterProduct] = useState(null);
+  const [selectedPosterPromo, setSelectedPosterPromo] = useState(null);
+  const [posterBadge, setPosterBadge] = useState('SIN_ETIQUETA');
+  const [posterFormat, setPosterFormat] = useState('A4_VERTICAL');
+  const [posterShowSavings, setPosterShowSavings] = useState(true);
+
 
   // Login
   const [email, setEmail] = useState('');
@@ -500,6 +509,8 @@ export default function App() {
     setViewingTicket(null);
     setIngressHistory([]);
     setShowIngressHistory(false);
+    setSelectedPosterProduct(null);
+    setSelectedPosterPromo(null);
   };
 
   const changeBranch = () => {
@@ -1862,6 +1873,219 @@ export default function App() {
     }
   };
 
+  // Funciones de Cartelería
+  const renderVisualGraphicHtml = (visualType, imageUri) => {
+    if (imageUri) {
+      return `<div class="visual-img-container"><img src="${imageUri}" class="visual-img" /></div>`;
+    }
+    let shapeClass = 'visual-unit';
+    let label = 'UNIDAD';
+    switch(visualType) {
+      case 'horma_redonda':
+        shapeClass = 'visual-circle';
+        label = 'HORMA REDONDA';
+        break;
+      case 'horma_rectangular':
+        shapeClass = 'visual-block';
+        label = 'HORMA RECTANGULAR';
+        break;
+      case 'barra':
+      case 'embutido_entero':
+      case 'jamon_entero':
+        shapeClass = 'visual-bar';
+        label = 'PIEZA ENTERA';
+        break;
+      case 'botella':
+        shapeClass = 'visual-bottle';
+        label = 'BOTELLA';
+        break;
+      case 'paquete':
+        shapeClass = 'visual-packet';
+        label = 'PAQUETE';
+        break;
+      default:
+        shapeClass = 'visual-unit';
+        label = 'PIEZA / UNIDAD';
+        break;
+    }
+    return `<div class="graphic-container"><div class="${shapeClass}"></div><div class="graphic-label">[ ${label} ]</div></div>`;
+  };
+
+  const generatePosterHtmlContent = () => {
+    let badgeText = '';
+    if (posterBadge === 'NUEVO') badgeText = '🔥 NUEVO 🔥';
+    else if (posterBadge === 'RECOMENDADO') badgeText = '⭐ RECOMENDADO ⭐';
+    else if (posterBadge === 'IDEAL PARA PICADAS') badgeText = '🧀 IDEAL PARA PICADAS 🍷';
+    else if (posterBadge === 'IMPERDIBLE') badgeText = '🔥 IMPERDIBLE 🔥';
+    else if (posterBadge === 'OFERTA') badgeText = '💥 OFERTA 💥';
+
+    const badgeHtml = badgeText ? `<div class="badge">${badgeText}</div>` : '';
+
+    let contentInner = '';
+
+    if (posterMode === 'producto') {
+      if (!selectedPosterProduct) return '<div class="empty-poster">Seleccioná un producto para generar el cartel</div>';
+      const prod = selectedPosterProduct;
+      const name = prod.name || 'PRODUCTO';
+      const brand = prod.brand ? `<div class="brand">${prod.brand}</div>` : '';
+      const price = formatMoney(prod.branch_price ?? prod.price_per_unit ?? 0);
+      const unitLabel = prod.unit_type === 'kg' ? 'KG' : 'UNID';
+      const visualType = prod.visual_presentation || 'unidad';
+      const imgUri = prod.product_image_uri || null;
+      const visualHtml = renderVisualGraphicHtml(visualType, imgUri);
+
+      contentInner = `
+        ${badgeHtml}
+        <div class="product-name">${name}</div>
+        ${brand}
+        ${visualHtml}
+        <div class="price-box">
+          <span class="price">${price}</span>
+          <span class="unit">/${unitLabel}</span>
+        </div>
+      `;
+    } else {
+      if (!selectedPosterPromo) return '<div class="empty-poster">Seleccioná una promoción para generar el cartel</div>';
+      const promo = selectedPosterPromo;
+      const name = promo.name || 'PROMOCIÓN';
+      const desc = promo.description ? `<div class="promo-desc">${promo.description}</div>` : '';
+      const promoPrice = formatMoney(promo.promo_price ?? 0);
+
+      let normalTotal = 0;
+      const itemsHtml = (promo.items || []).map(item => {
+        const qtyF = formatQuantityVisual(item.included_qty, item.unit_type);
+        const compPrice = Number(item.regular_unit_price || item.price_per_unit || 0);
+        normalTotal += Number(item.included_qty || 0) * compPrice;
+        return `<div class="promo-item">• ${qtyF} ${item.product_name || item.name || 'Componente'}</div>`;
+      }).join('');
+
+      let savingsHtml = '';
+      if (posterShowSavings && normalTotal > (promo.promo_price ?? 0)) {
+        const ahorro = normalTotal - (promo.promo_price ?? 0);
+        savingsHtml = `
+          <div class="savings-box">
+            <div class="normal-price">Antes: ${formatMoney(normalTotal)}</div>
+            <div class="now-price">Ahora: ${promoPrice}</div>
+            <div class="saved-amount">¡Ahorrás: ${formatMoney(ahorro)}!</div>
+          </div>
+        `;
+      } else {
+        savingsHtml = `
+          <div class="price-box">
+            <span class="price">${promoPrice}</span>
+          </div>
+        `;
+      }
+
+      contentInner = `
+        ${badgeHtml}
+        <div class="product-name">${name}</div>
+        ${desc}
+        <div class="promo-items-container">
+          ${itemsHtml}
+        </div>
+        ${savingsHtml}
+      `;
+    }
+
+    let repeatCount = 1;
+    if (posterFormat === 'A4_2_POR_HOJA') repeatCount = 2;
+    else if (posterFormat === 'A4_4_POR_HOJA') repeatCount = 4;
+
+    const isHorizontal = posterFormat === 'A4_HORIZONTAL';
+    const pageClass = isHorizontal ? 'page-horizontal' : 'page-vertical';
+    const containerGridClass = repeatCount === 4 ? 'grid-4' : repeatCount === 2 ? 'grid-2' : 'grid-1';
+
+    let postersHtml = '';
+    for (let i = 0; i < repeatCount; i++) {
+      postersHtml += `<div class="poster-card ${containerGridClass}">${contentInner}</div>`;
+    }
+
+    return `
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            @page { size: A4 ${isHorizontal ? 'landscape' : 'portrait'}; margin: 10mm; }
+            body { font-family: 'Arial Black', Arial, sans-serif; margin: 0; padding: 0; background: #fff; color: #000; }
+            .sheet { display: flex; flex-direction: ${repeatCount === 2 && !isHorizontal ? 'column' : 'row'}; flex-wrap: wrap; width: 100%; height: 100%; box-sizing: border-box; justify-content: space-around; align-content: space-around; }
+            .poster-card { border: 6px solid #000; background: #fffde7; padding: 15px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; position: relative; }
+            
+            .grid-1 { width: 100%; height: 100%; min-height: 250mm; }
+            .grid-2 { width: ${isHorizontal ? '48%' : '100%'}; height: ${isHorizontal ? '95%' : '125mm'}; }
+            .grid-4 { width: 48%; height: 125mm; }
+
+            .badge { background: #d32f2f; color: #fff; font-size: ${repeatCount === 4 ? '14px' : '20px'}; font-weight: bold; padding: 6px 16px; border-radius: 6px; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 1px; border: 2px solid #000; }
+            .product-name { font-size: ${repeatCount === 4 ? '20px' : repeatCount === 2 ? '26px' : '36px'}; font-weight: 900; color: #000; margin-bottom: 6px; text-transform: uppercase; line-height: 1.1; }
+            .brand { font-size: ${repeatCount === 4 ? '12px' : '16px'}; color: #555; font-weight: bold; margin-bottom: 6px; text-transform: uppercase; }
+            .promo-desc { font-size: 12px; color: #444; margin-bottom: 8px; font-style: italic; }
+            
+            .graphic-container { margin: 10px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+            .graphic-label { font-size: 11px; font-weight: bold; color: #666; margin-top: 4px; }
+            .visual-circle { width: ${repeatCount === 4 ? '60px' : '90px'}; height: ${repeatCount === 4 ? '60px' : '90px'}; border-radius: 50%; background: #ffb300; border: 4px solid #000; box-shadow: inset -6px -6px 0px rgba(0,0,0,0.15); }
+            .visual-block { width: ${repeatCount === 4 ? '80px' : '110px'}; height: ${repeatCount === 4 ? '50px' : '70px'}; background: #ff8f00; border: 4px solid #000; border-radius: 4px; }
+            .visual-bar { width: ${repeatCount === 4 ? '100px' : '140px'}; height: ${repeatCount === 4 ? '35px' : '50px'}; background: #d32f2f; border: 4px solid #000; border-radius: 20px; }
+            .visual-bottle { width: ${repeatCount === 4 ? '30px' : '45px'}; height: ${repeatCount === 4 ? '90px' : '130px'}; background: #388e3c; border: 4px solid #000; border-radius: 8px 8px 4px 4px; }
+            .visual-packet { width: ${repeatCount === 4 ? '70px' : '100px'}; height: ${repeatCount === 4 ? '60px' : '85px'}; background: #1976d2; border: 4px solid #000; border-radius: 6px; }
+            .visual-unit { width: ${repeatCount === 4 ? '60px' : '80px'}; height: ${repeatCount === 4 ? '60px' : '80px'}; background: #e0e0e0; border: 4px solid #000; border-radius: 50%; }
+            .visual-img-container { margin: 10px 0; max-height: 120px; }
+            .visual-img { max-height: 100px; max-width: 150px; object-fit: contain; border: 2px solid #000; }
+
+            .promo-items-container { margin: 8px 0; font-size: ${repeatCount === 4 ? '12px' : '16px'}; font-weight: bold; text-align: left; background: #fff; padding: 8px; border: 2px dashed #000; width: 85%; }
+            .promo-item { margin: 4px 0; color: #222; }
+
+            .price-box { background: #000; color: #ffeb3b; padding: 8px 20px; border-radius: 8px; margin-top: 10px; display: inline-block; border: 3px solid #d32f2f; }
+            .price { font-size: ${repeatCount === 4 ? '28px' : repeatCount === 2 ? '38px' : '52px'}; font-weight: 900; letter-spacing: -1px; }
+            .unit { font-size: ${repeatCount === 4 ? '14px' : '18px'}; font-weight: bold; margin-left: 4px; color: #fff; }
+
+            .savings-box { background: #000; color: #fff; padding: 8px 15px; border-radius: 8px; margin-top: 8px; border: 3px solid #28a745; width: 90%; }
+            .normal-price { font-size: ${repeatCount === 4 ? '12px' : '14px'}; text-decoration: line-through; color: #ff8a80; }
+            .now-price { font-size: ${repeatCount === 4 ? '22px' : '30px'}; color: #ffeb3b; font-weight: 900; }
+            .saved-amount { font-size: ${repeatCount === 4 ? '12px' : '15px'}; color: #81c784; font-weight: bold; margin-top: 2px; }
+          </style>
+        </head>
+        <body>
+          <div class="sheet">
+            ${postersHtml}
+          </div>
+        </body>
+      </html>
+    `;
+  };
+
+  const handleGeneratePosterPdf = async () => {
+    try {
+      setLoading(true);
+      const html = generatePosterHtmlContent();
+      const { uri } = await Print.printToFileAsync({ html });
+      const filename = `cartel_${Date.now()}.pdf`;
+      const newUri = FileSystem.documentDirectory + filename;
+      await FileSystem.moveAsync({ from: uri, to: newUri });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(newUri, { mimeType: 'application/pdf', dialogTitle: 'Cartel Imprimible' });
+      } else {
+        alert('La función de compartir no está disponible en este dispositivo.');
+      }
+    } catch (e) {
+      alert('No se pudo generar el PDF del cartel');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePrintPoster = async () => {
+    try {
+      setLoading(true);
+      const html = generatePosterHtmlContent();
+      await Print.printAsync({ html });
+    } catch (e) {
+      alert('No se pudo imprimir el cartel');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (!isLoggedIn) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -1932,6 +2156,7 @@ export default function App() {
   const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : activeProducts.filter(p => p.name.toLowerCase().includes(searchQueryVendor.toLowerCase()));
   const filteredProductsCashier = searchQueryCashier.trim() === '' ? [] : activeProducts.filter(p => p.name.toLowerCase().includes(searchQueryCashier.toLowerCase()));
   const filteredProductsStock = searchQueryStock.trim() === '' ? [] : products.filter(p => p.name.toLowerCase().includes(searchQueryStock.toLowerCase()) || (p.barcode && p.barcode.includes(searchQueryStock)));
+  const filteredProductsPoster = posterProductSearch.trim() === '' ? [] : activeProducts.filter(p => p.name.toLowerCase().includes(posterProductSearch.toLowerCase()) || (p.barcode && p.barcode.includes(posterProductSearch)));
 return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
@@ -2237,6 +2462,213 @@ return (
                     )}
                   </View>
                 )}
+              </View>
+            )}
+          </ScrollView>
+        )}
+
+        {/* CARTELERÍA */}
+        {currentTab === 'carteleria' && isAdminLevel && (
+          <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
+            <Text style={styles.sectionTitle}>🪧 Cartelería Comercial</Text>
+            
+            {/* Selector de Modo: Producto / Promoción */}
+            <View style={{ flexDirection: 'row', marginBottom: 15, backgroundColor: '#e9ecef', borderRadius: 8, padding: 3 }}>
+              <TouchableOpacity 
+                style={[{ flex: 1, padding: 10, alignItems: 'center', borderRadius: 6 }, posterMode === 'producto' && { backgroundColor: '#d32f2f' }]}
+                onPress={() => { setPosterMode('producto'); setSelectedPosterPromo(null); }}
+              >
+                <Text style={{ fontWeight: 'bold', color: posterMode === 'producto' ? '#fff' : '#333' }}>📦 Producto</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[{ flex: 1, padding: 10, alignItems: 'center', borderRadius: 6 }, posterMode === 'promocion' && { backgroundColor: '#d32f2f' }]}
+                onPress={() => { setPosterMode('promocion'); setSelectedPosterProduct(null); loadPromotions(); }}
+              >
+                <Text style={{ fontWeight: 'bold', color: posterMode === 'promocion' ? '#fff' : '#333' }}>🎁 Promoción</Text>
+              </TouchableOpacity>
+            </View>
+
+            {posterMode === 'producto' ? (
+              <View style={styles.card}>
+                <Text style={styles.subSectionTitle}>1. Buscar Producto ({branchName})</Text>
+                <TextInput style={styles.searchInput} placeholder="Buscar producto por nombre o EAN" value={posterProductSearch} onChangeText={setPosterProductSearch} />
+                
+                {posterProductSearch.trim() !== '' && (
+                  <View style={styles.dropdownContainer}>
+                    {activeProducts.filter(p => p.name.toLowerCase().includes(posterProductSearch.toLowerCase()) || (p.barcode && p.barcode.includes(posterProductSearch))).length === 0 ? (
+                      <Text style={{ padding: 10, color: '#888' }}>Sin coincidencias en esta sucursal.</Text>
+                    ) : (
+                      activeProducts.filter(p => p.name.toLowerCase().includes(posterProductSearch.toLowerCase()) || (p.barcode && p.barcode.includes(posterProductSearch))).map(p => (
+                        <TouchableOpacity key={p.id} style={styles.dropdownItem} onPress={() => { setSelectedPosterProduct(p); setPosterProductSearch(''); }}>
+                          <Text style={{ fontWeight: 'bold' }}>{p.name}</Text>
+                          <Text style={{ color: '#28a745', fontSize: 12 }}>{formatMoney(p.branch_price ?? p.price_per_unit)} / {p.unit_type}</Text>
+                        </TouchableOpacity>
+                      ))
+                    )}
+                  </View>
+                )}
+
+                {selectedPosterProduct && (
+                  <View style={{ marginTop: 10, padding: 10, backgroundColor: '#e8f4f8', borderRadius: 6, borderWidth: 1, borderColor: '#b8daff' }}>
+                    <Text style={{ fontWeight: 'bold', fontSize: 14, color: '#004085' }}>✓ Seleccionado: {selectedPosterProduct.name}</Text>
+                    <Text style={{ fontSize: 12, color: '#333', marginTop: 2 }}>Precio actual: {formatMoney(selectedPosterProduct.branch_price ?? selectedPosterProduct.price_per_unit ?? 0)} / {selectedPosterProduct.unit_type}</Text>
+                    {selectedPosterProduct.brand ? <Text style={{ fontSize: 12, color: '#555' }}>Marca: {selectedPosterProduct.brand}</Text> : null}
+                    {selectedPosterProduct.barcode ? <Text style={{ fontSize: 12, color: '#555' }}>EAN: {selectedPosterProduct.barcode}</Text> : null}
+                    <Text style={{ fontSize: 12, color: '#555' }}>Presentación visual: {selectedPosterProduct.visual_presentation || 'unidad'}</Text>
+                  </View>
+                )}
+              </View>
+            ) : (
+              <View style={styles.card}>
+                <Text style={styles.subSectionTitle}>1. Seleccionar Promoción Activa ({branchName})</Text>
+                {promotions.filter(p => p.active === true && p.enabled === true).length === 0 ? (
+                  <Text style={styles.emptyText}>No hay promociones activas en esta sucursal.</Text>
+                ) : (
+                  promotions.filter(p => p.active === true && p.enabled === true).map(promo => (
+                    <TouchableOpacity 
+                      key={promo.id} 
+                      style={[styles.card, { borderWidth: selectedPosterPromo?.id === promo.id ? 2 : 1, borderColor: selectedPosterPromo?.id === promo.id ? '#d32f2f' : '#ccc', marginBottom: 8 }]} 
+                      onPress={() => setSelectedPosterPromo(promo)}
+                    >
+                      <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#6f42c1' }}>🎁 {promo.name}</Text>
+                      {promo.description ? <Text style={{ fontSize: 11, color: '#555' }}>{promo.description}</Text> : null}
+                      <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#28a745', marginTop: 4 }}>Precio promo: {formatMoney(promo.promo_price ?? 0)}</Text>
+                    </TouchableOpacity>
+                  ))
+                )}
+              </View>
+            )}
+
+            {/* Opciones de Etiqueta y Formato */}
+            <View style={styles.card}>
+              <Text style={styles.subSectionTitle}>2. Etiqueta Comercial</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+                {[
+                  ['SIN_ETIQUETA', 'Sin etiqueta'],
+                  ['NUEVO', 'NUEVO'],
+                  ['RECOMENDADO', 'RECOMENDADO'],
+                  ['IDEAL PARA PICADAS', 'IDEAL PARA PICADAS'],
+                  ['IMPERDIBLE', 'IMPERDIBLE'],
+                  ['OFERTA', 'OFERTA']
+                ].map(([bKey, bLabel]) => (
+                  <TouchableOpacity 
+                    key={bKey} 
+                    style={[styles.typeBtn, { marginRight: 6, paddingHorizontal: 10 }, posterBadge === bKey && { backgroundColor: '#d32f2f', borderColor: '#b71c1c' }]} 
+                    onPress={() => setPosterBadge(bKey)}
+                  >
+                    <Text style={{ fontSize: 11, color: posterBadge === bKey ? '#fff' : '#333', fontWeight: 'bold' }}>{bLabel}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              {posterMode === 'promocion' && selectedPosterPromo && (
+                <View style={{ marginVertical: 8 }}>
+                  <TouchableOpacity 
+                    style={[styles.typeBtn, { backgroundColor: posterShowSavings ? '#28a745' : '#e9ecef', padding: 10 }]} 
+                    onPress={() => setPosterShowSavings(!posterShowSavings)}
+                  >
+                    <Text style={{ color: posterShowSavings ? '#fff' : '#333', fontWeight: 'bold', textAlign: 'center', fontSize: 12 }}>
+                      {posterShowSavings ? '✓ Mostrar precio normal y ahorro' : '✗ Ocultar precio normal y ahorro'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              <Text style={styles.subSectionTitle}>3. Formato de Impresión</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+                {[
+                  ['A4_VERTICAL', 'A4 Vertical'],
+                  ['A4_HORIZONTAL', 'A4 Horizontal'],
+                  ['A4_2_POR_HOJA', '2 por A4'],
+                  ['A4_4_POR_HOJA', '4 por A4']
+                ].map(([fKey, fLabel]) => (
+                  <TouchableOpacity 
+                    key={fKey} 
+                    style={[styles.typeBtn, { marginRight: 6, paddingHorizontal: 10 }, posterFormat === fKey && { backgroundColor: '#007bff' }]} 
+                    onPress={() => setPosterFormat(fKey)}
+                  >
+                    <Text style={{ fontSize: 11, color: posterFormat === fKey ? '#fff' : '#333', fontWeight: 'bold' }}>{fLabel}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
+            {/* Vista Previa Simplificada */}
+            <View style={[styles.card, { borderWidth: 3, borderColor: '#d32f2f', backgroundColor: '#fffde7' }]}>
+              <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#d32f2f', textAlign: 'center', marginBottom: 6 }}>👁️ VISTA PREVIA DEL CARTEL</Text>
+              
+              {posterMode === 'producto' ? (
+                selectedPosterProduct ? (
+                  <View style={{ alignItems: 'center', padding: 10 }}>
+                    {posterBadge !== 'SIN_ETIQUETA' && (
+                      <View style={{ backgroundColor: '#d32f2f', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 4, marginBottom: 8 }}>
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>🔥 {posterBadge} 🔥</Text>
+                      </View>
+                    )}
+                    <Text style={{ fontSize: 20, fontWeight: '900', textAlign: 'center', textTransform: 'uppercase' }}>{selectedPosterProduct.name}</Text>
+                    {selectedPosterProduct.brand ? <Text style={{ fontSize: 12, color: '#555', fontWeight: 'bold', marginTop: 2 }}>{selectedPosterProduct.brand}</Text> : null}
+                    
+                    <View style={{ marginVertical: 12, padding: 15, backgroundColor: '#fff', borderRadius: 8, borderWidth: 2, borderColor: '#000', width: '80%', alignItems: 'center' }}>
+                      <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#666' }}>[ {selectedPosterProduct.visual_presentation ? selectedPosterProduct.visual_presentation.toUpperCase() : 'PIEZA / UNIDAD'} ]</Text>
+                    </View>
+
+                    <View style={{ backgroundColor: '#000', paddingHorizontal: 20, paddingVertical: 8, borderRadius: 8, borderWidth: 2, borderColor: '#d32f2f' }}>
+                      <Text style={{ fontSize: 26, fontWeight: '900', color: '#ffeb3b' }}>
+                        {formatMoney(selectedPosterProduct.branch_price ?? selectedPosterProduct.price_per_unit ?? 0)} <Text style={{ fontSize: 14, color: '#fff' }}>/{selectedPosterProduct.unit_type === 'kg' ? 'KG' : 'UNID'}</Text>
+                      </Text>
+                    </View>
+                  </View>
+                ) : <Text style={{ textAlign: 'center', color: '#888', fontStyle: 'italic', padding: 20 }}>Seleccioná un producto arriba</Text>
+              ) : (
+                selectedPosterPromo ? (
+                  <View style={{ alignItems: 'center', padding: 10 }}>
+                    {posterBadge !== 'SIN_ETIQUETA' && (
+                      <View style={{ backgroundColor: '#d32f2f', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 4, marginBottom: 8 }}>
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>🔥 {posterBadge} 🔥</Text>
+                      </View>
+                    )}
+                    <Text style={{ fontSize: 20, fontWeight: '900', textAlign: 'center', textTransform: 'uppercase', color: '#6f42c1' }}>{selectedPosterPromo.name}</Text>
+                    {selectedPosterPromo.description ? <Text style={{ fontSize: 11, color: '#555', fontStyle: 'italic', marginVertical: 4 }}>{selectedPosterPromo.description}</Text> : null}
+
+                    <View style={{ width: '90%', backgroundColor: '#fff', padding: 8, borderWidth: 1, borderStyle: 'dashed', borderColor: '#000', marginVertical: 8 }}>
+                      {(selectedPosterPromo.items || []).map((ci, idx) => (
+                        <Text key={idx} style={{ fontSize: 12, fontWeight: 'bold', color: '#333' }}>• {formatQuantityVisual(ci.included_qty, ci.unit_type)} {ci.product_name || ci.name}</Text>
+                      ))}
+                    </View>
+
+                    {posterShowSavings ? (() => {
+                      let normTotal = 0;
+                      (selectedPosterPromo.items || []).forEach(ci => {
+                        normTotal += Number(ci.included_qty || 0) * Number(ci.regular_unit_price || ci.price_per_unit || 0);
+                      });
+                      const promoP = Number(selectedPosterPromo.promo_price || 0);
+                      const ahorro = normTotal - promoP;
+                      return (
+                        <View style={{ backgroundColor: '#000', padding: 10, borderRadius: 8, alignItems: 'center', width: '90%', borderWidth: 2, borderColor: '#28a745' }}>
+                          {normTotal > promoP && <Text style={{ fontSize: 12, color: '#ff8a80', textDecorationLine: 'line-through' }}>Antes: {formatMoney(normTotal)}</Text>}
+                          <Text style={{ fontSize: 22, fontWeight: '900', color: '#ffeb3b' }}>Ahora: {formatMoney(promoP)}</Text>
+                          {ahorro > 0 && <Text style={{ fontSize: 12, color: '#81c784', fontWeight: 'bold', marginTop: 2 }}>¡Ahorrás: {formatMoney(ahorro)}!</Text>}
+                        </View>
+                      );
+                    })() : (
+                      <View style={{ backgroundColor: '#000', paddingHorizontal: 20, paddingVertical: 8, borderRadius: 8 }}>
+                        <Text style={{ fontSize: 24, fontWeight: '900', color: '#ffeb3b' }}>{formatMoney(selectedPosterPromo.promo_price ?? 0)}</Text>
+                      </View>
+                    )}
+                  </View>
+                ) : <Text style={{ textAlign: 'center', color: '#888', fontStyle: 'italic', padding: 20 }}>Seleccioná una promoción arriba</Text>
+              )}
+            </View>
+
+            {/* Botones de Generación y Acción */}
+            {(selectedPosterProduct || selectedPosterPromo) && (
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
+                <TouchableOpacity style={[styles.buttonPrimary, { flex: 0.48, backgroundColor: '#007bff' }]} onPress={handleGeneratePosterPdf} disabled={loading}>
+                  <Text style={styles.buttonText}>📄 Generar PDF</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.buttonPrimary, { flex: 0.48, backgroundColor: '#6f42c1' }]} onPress={handlePrintPoster} disabled={loading}>
+                  <Text style={styles.buttonText}>🖨️ Imprimir Cartel</Text>
+                </TouchableOpacity>
               </View>
             )}
           </ScrollView>
@@ -3026,7 +3458,8 @@ return (
                         const supplierVal = item.supplier || '-';
                         const lotVal = item.lot_code ?? item.lot_number || '-';
                         const expVal = item.expiration_date || '-';
-                        const dateVal = item.received_at || item.created_at || '-';
+                        const dateValRaw = item.received_at || item.created_at;
+                        const dateVal = dateValRaw ? new Date(dateValRaw).toLocaleString('es-AR') : '-';
 
                         return (
                           <View key={recId} style={{ backgroundColor: '#f8f9fa', padding: 12, borderRadius: 8, marginBottom: 10, borderWidth: 1, borderColor: '#dee2e6' }}>
@@ -3418,6 +3851,13 @@ return (
             <TouchableOpacity style={[styles.navBtn, currentTab === 'caja' && styles.navActive]} onPress={() => handleTabChange('caja')}>
               <Text style={styles.navIcon}>💳</Text>
               <Text style={styles.navText}>Caja</Text>
+            </TouchableOpacity>
+          )}
+
+          {isAdminLevel && (
+            <TouchableOpacity style={[styles.navBtn, currentTab === 'carteleria' && styles.navActive]} onPress={() => handleTabChange('carteleria')}>
+              <Text style={styles.navIcon}>🪧</Text>
+              <Text style={styles.navText}>Carteles</Text>
             </TouchableOpacity>
           )}
 
