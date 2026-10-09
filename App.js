@@ -1306,7 +1306,7 @@ export default function App() {
     }).length;
 
     const rowsHtml = list.map(item => {
-      const priceNum = Number(item.branch_price ?? item.price_per_unit || 0);
+      const priceNum = Number(item.branch_price ?? item.price_per_unit ?? 0);
       const formattedPrice = '$' + priceNum.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       return `
         <tr>
@@ -1437,7 +1437,7 @@ export default function App() {
         Categoría: item.category || 'Varios',
         Stock: Number(item.stock || 0),
         Unidad: item.unit_type || 'unid',
-        'Precio de venta': Number(item.branch_price ?? item.price_per_unit || 0)
+        'Precio de venta': Number(item.branch_price ?? item.price_per_unit ?? 0)
       }));
 
       const worksheet = XLSX.utils.json_to_sheet(excelData);
@@ -2283,7 +2283,7 @@ return (
                           <Text style={{ fontWeight: 'bold', fontSize: 13, color: '#222' }}>{item.name}</Text>
                           <Text style={{ fontSize: 11, color: '#555' }}>EAN: {item.barcode || 'Sin EAN'} | Categoría: {item.category || 'Varios'}</Text>
                           <Text style={{ fontSize: 11, color: '#555' }}>Stock actual: {item.stock} {item.unit_type}</Text>
-                          <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#28a745' }}>Precio venta: {formatMoney(item.branch_price ?? item.price_per_unit)}</Text>
+                          <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#28a745' }}>Precio venta: {formatMoney(item.branch_price ?? item.price_per_unit ?? 0)}</Text>
                         </View>
                       ))
                     )}
