@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system';
+import * as XLSX from 'xlsx';
 import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProfitability, fetchMasterProductByBarcode, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, updateIngress, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled, actOnAlert, fetchAlertHistory, updateReplenishmentPolicy , fetchBranchProductsAdmin, configureBranchProduct, removeBranchProduct, fetchLatestProductAudit } from './api';
 
 export default function App() {
@@ -1027,6 +1031,200 @@ export default function App() {
     finally { setLoading(false); }
   };
 
+  // Helper unificado para obtener productos filtrados en el Listado de Stock y Precios
+  const getFilteredStockProducts = () => {
+    return products.filter(p => {
+      const matchSearch = p.name.toLowerCase().includes(stockListSearch.toLowerCase()) || (p.barcode && p.barcode.includes(stockListSearch));
+      const matchCat = stockListCategory === 'todas' || (p.category || 'Varios') === stockListCategory;
+      
+      const stk = Number(p.stock || 0);
+      const minStk = Number(p.min_stock || p.critical_stock || 0);
+      const isCrit = minStk > 0 ? stk <= minStk : false;
+
+      let matchFilter = true;
+      if (stockListFilter === 'con_stock') matchFilter = stk > 0;
+      else if (stockListFilter === 'sin_stock') matchFilter = stk <= 0;
+      else if (stockListFilter === 'critico') matchFilter = isCrit;
+
+      return matchSearch && matchCat && matchFilter;
+    });
+  };
+
+  const generateStockListHtml = () => {
+    const list = getFilteredStockProducts();
+    if (list.length === 0) return null;
+
+    const currentBranchLabel = `Sucursal: ${branchName}`;
+    const nowStr = new Date().toLocaleString('es-AR');
+
+    const totalProds = products.length;
+    const totalConStock = products.filter(p => Number(p.stock || 0) > 0).length;
+    const totalSinStock = products.filter(p => Number(p.stock || 0) <= 0).length;
+    const totalCriticos = products.filter(p => {
+      const stk = Number(p.stock || 0);
+      const minStk = Number(p.min_stock || p.critical_stock || 0);
+      return minStk > 0 ? stk <= minStk : false;
+    }).length;
+
+    const rowsHtml = list.map(item => {
+      const priceNum = Number(item.branch_price ?? item.price_per_unit || 0);
+      const formattedPrice = '$' + priceNum.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return `
+        <tr>
+          <td>${item.name || ''}</td>
+          <td>${item.barcode || 'Sin EAN'}</td>
+          <td>${item.category || 'Varios'}</td>
+          <td>${item.stock ?? 0}</td>
+          <td>${item.unit_type || 'unid'}</td>
+          <td>${formattedPrice}</td>
+        </tr>
+      `;
+    }).join('');
+
+    return `
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: Helvetica, Arial, sans-serif; color: #333; padding: 20px; }
+            h1 { font-size: 20px; color: #1a1a1a; margin-bottom: 4px; }
+            h2 { font-size: 14px; color: #555; margin-top: 0; margin-bottom: 15px; }
+            .info { font-size: 12px; margin-bottom: 15px; color: #444; }
+            .summary { background: #f8f9fa; padding: 10px; border-radius: 6px; margin-bottom: 20px; font-size: 12px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 11px; }
+            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+            th { background-color: #007bff; color: white; }
+          </style>
+        </head>
+        <body>
+          <h1>FIAMBRERÍA POS & MRP</h1>
+          <h2>Listado de Stock y Precios</h2>
+          <div class="info">
+            <div><strong>${currentBranchLabel}</strong></div>
+            <div>Fecha: ${nowStr}</div>
+          </div>
+          <div class="summary">
+            <strong>Resumen:</strong><br/>
+            Productos: ${totalProds} | Con stock: ${totalConStock} | Sin stock: ${totalSinStock} | Críticos: ${totalCriticos}
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Producto</th>
+                <th>EAN</th>
+                <th>Categoría</th>
+                <th>Stock</th>
+                <th>Unidad</th>
+                <th>Precio de venta</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+  };
+
+  const handleGeneratePdfAndGetUri = async () => {
+    const html = generateStockListHtml();
+    if (!html) {
+      alert('No hay productos para exportar');
+      return null;
+    }
+    try {
+      const { uri } = await Print.printToFileAsync({ html });
+      return uri;
+    } catch (e) {
+      alert('No se pudo generar el PDF');
+      return null;
+    }
+  };
+
+  const handleExportPdf = async () => {
+    try {
+      setLoading(true);
+      const uri = await handleGeneratePdfAndGetUri();
+      if (!uri) return;
+
+      const sanitizedBranch = (branchName || 'sucursal').replace(/\s+/g, '_');
+      const dateStr = new Date().toISOString().split('T')[0];
+      const filename = `stock_${sanitizedBranch}_${dateStr}.pdf`;
+      const newUri = FileSystem.documentDirectory + filename;
+
+      await FileSystem.moveAsync({ from: uri, to: newUri });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(newUri, { mimeType: 'application/pdf', dialogTitle: 'Compartir Listado de Stock' });
+      } else {
+        alert('La función de compartir no está disponible en este dispositivo.');
+      }
+    } catch (e) {
+      alert('No se pudo compartir el archivo');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePrintPdf = async () => {
+    const html = generateStockListHtml();
+    if (!html) {
+      alert('No hay productos para exportar');
+      return;
+    }
+    try {
+      setLoading(true);
+      await Print.printAsync({ html });
+    } catch (e) {
+      alert('No se pudo generar el PDF');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExportExcel = async () => {
+    const list = getFilteredStockProducts();
+    if (list.length === 0) {
+      alert('No hay productos para exportar');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const excelData = list.map(item => ({
+        Producto: item.name || '',
+        EAN: item.barcode || 'Sin EAN',
+        Categoría: item.category || 'Varios',
+        Stock: Number(item.stock || 0),
+        Unidad: item.unit_type || 'unid',
+        'Precio de venta': Number(item.branch_price ?? item.price_per_unit || 0)
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(excelData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Stock y Precios');
+
+      const wbout = XLSX.write(workbook, { type: 'base64', bookType: 'xlsx' });
+      const sanitizedBranch = (branchName || 'sucursal').replace(/\s+/g, '_');
+      const dateStr = new Date().toISOString().split('T')[0];
+      const filename = `stock_${sanitizedBranch}_${dateStr}.xlsx`;
+      const fileUri = FileSystem.documentDirectory + filename;
+
+      await FileSystem.writeAsStringAsync(fileUri, wbout, { encoding: FileSystem.EncodingType.Base64 });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, { mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dialogTitle: 'Exportar Excel de Stock' });
+      } else {
+        alert('La función de compartir no está disponible en este dispositivo.');
+      }
+    } catch (e) {
+      alert('No se pudo generar el Excel');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (!isLoggedIn) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -1674,7 +1872,7 @@ return (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>📦 Control FEFO e Inventario</Text>
 
-            {/* SECCIÓN NUEVA: Listados / Control de inventario */}
+            {/* SECCIÓN NUEVA: Listados / Control de inventario con exportación real */}
             <View style={styles.card}>
               <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#333', marginBottom: 8 }}>📋 Listados / Control de inventario</Text>
               <TouchableOpacity style={styles.buttonPrimary} onPress={() => setShowStockList(!showStockList)}>
@@ -1684,22 +1882,7 @@ return (
               {showStockList && (() => {
                 const currentBranchLabel = `Sucursal: ${branchName}`;
                 const allCats = ['todas', ...new Set(products.map(p => p.category || 'Varios'))];
-                
-                const filteredList = products.filter(p => {
-                  const matchSearch = p.name.toLowerCase().includes(stockListSearch.toLowerCase()) || (p.barcode && p.barcode.includes(stockListSearch));
-                  const matchCat = stockListCategory === 'todas' || (p.category || 'Varios') === stockListCategory;
-                  
-                  const stk = Number(p.stock || 0);
-                  const minStk = Number(p.min_stock || p.critical_stock || 0);
-                  const isCrit = minStk > 0 ? stk <= minStk : false;
-
-                  let matchFilter = true;
-                  if (stockListFilter === 'con_stock') matchFilter = stk > 0;
-                  else if (stockListFilter === 'sin_stock') matchFilter = stk <= 0;
-                  else if (stockListFilter === 'critico') matchFilter = isCrit;
-
-                  return matchSearch && matchCat && matchFilter;
-                });
+                const filteredList = getFilteredStockProducts();
 
                 const totalProds = products.length;
                 const totalConStock = products.filter(p => Number(p.stock || 0) > 0).length;
@@ -1752,10 +1935,21 @@ return (
                       ))}
                     </ScrollView>
 
-                    {/* Botón de Exportación con texto condicional / deshabilitado */}
-                    <TouchableOpacity style={[styles.buttonPrimary, { backgroundColor: '#6c757d', marginBottom: 10 }]} disabled={true}>
-                      <Text style={styles.buttonText}>📤 Compartir listado (PDF / Excel se habilitarán en la siguiente integración)</Text>
-                    </TouchableOpacity>
+                    {/* Grupo Responsive de Botones de Exportación */}
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 12, marginHorizontal: -3 }}>
+                      <TouchableOpacity style={[styles.exportBtnItem, { backgroundColor: '#dc3545' }]} onPress={handleExportPdf} disabled={loading}>
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 11, textAlign: 'center' }}>📄 PDF</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[styles.exportBtnItem, { backgroundColor: '#28a745' }]} onPress={handleExportExcel} disabled={loading}>
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 11, textAlign: 'center' }}>📊 Excel</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[styles.exportBtnItem, { backgroundColor: '#007bff' }]} onPress={handleExportPdf} disabled={loading}>
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 11, textAlign: 'center' }}>📤 Compartir PDF</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[styles.exportBtnItem, { backgroundColor: '#6f42c1' }]} onPress={handlePrintPdf} disabled={loading}>
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 11, textAlign: 'center' }}>🖨 Imprimir</Text>
+                      </TouchableOpacity>
+                    </View>
 
                     {/* Lista real de stock y precios */}
                     {filteredList.length === 0 ? (
@@ -2292,5 +2486,6 @@ const styles = StyleSheet.create({
   cashOpenHeaderCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#d4edda', padding: 10, borderRadius: 8, marginBottom: 15, flexWrap: 'wrap' },
   arqueoBtnStyle: { backgroundColor: '#dc3545', padding: 8, borderRadius: 6, marginTop: 4 },
   wrapButtonsRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 8, marginHorizontal: -3 },
-  wrapBtnItem: { flexBasis: '31%', flexGrow: 1, margin: 3, padding: 8, borderWidth: 1, borderColor: '#ccc', borderRadius: 8, alignItems: 'center', backgroundColor: '#e9ecef', justifyContent: 'center' }
+  wrapBtnItem: { flexBasis: '31%', flexGrow: 1, margin: 3, padding: 8, borderWidth: 1, borderColor: '#ccc', borderRadius: 8, alignItems: 'center', backgroundColor: '#e9ecef', justifyContent: 'center' },
+  exportBtnItem: { flexBasis: '48%', flexGrow: 1, margin: 3, padding: 10, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }
 });
