@@ -5,7 +5,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import * as XLSX from 'xlsx';
-import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProfitability, fetchMasterProductByBarcode, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, updateIngress, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled, actOnAlert, fetchAlertHistory, updateReplenishmentPolicy, fetchBranchProductsAdmin, configureBranchProduct, removeBranchProduct, fetchLatestProductAudit, fetchSalesHistory, fetchSaleDetail } from './api';
+import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProfitability, fetchMasterProductByBarcode, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, updateIngress, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled, actOnAlert, fetchAlertHistory, updateReplenishmentPolicy, fetchBranchProductsAdmin, configureBranchProduct, removeBranchProduct, fetchLatestProductAudit, fetchSalesHistory, fetchSaleDetail, fetchPromotions, fetchPromotionDetail, createPromotion, updatePromotion, deletePromotion, calculatePromotion } from './api';
 
 export default function App() {
   const loadBranchAdminProducts = async () => {
@@ -142,6 +142,28 @@ export default function App() {
   const [ingressSearch, setIngressSearch] = useState('');
   const [ingressMatches, setIngressMatches] = useState([]);
 
+  // Promociones
+  const [salesMode, setSalesMode] = useState('normal'); // 'normal' | 'promotions'
+  const [promotions, setPromotions] = useState([]);
+  const [selectedPromotion, setSelectedPromotion] = useState(null);
+  const [promotionItems, setPromotionItems] = useState([]);
+  const [promotionCalculation, setPromotionCalculation] = useState(null);
+  const [promotionLoading, setPromotionLoading] = useState(false);
+
+  // Administración de Promociones
+  const [showPromotionAdmin, setShowPromotionAdmin] = useState(false);
+  const [editingPromotionId, setEditingPromotionId] = useState(null);
+  const [promoFormName, setPromoFormName] = useState('');
+  const [promoFormDesc, setPromoFormDesc] = useState('');
+  const [promoFormEnabled, setPromoFormEnabled] = useState(true);
+  const [promoFormItems, setPromoFormItems] = useState([]);
+  const [promoFormPriceB1, setPromoFormPriceB1] = useState('');
+  const [promoFormEnabledB1, setPromoFormEnabledB1] = useState(true);
+  const [promoFormPriceB2, setPromoFormPriceB2] = useState('');
+  const [promoFormEnabledB2, setPromoFormEnabledB2] = useState(true);
+  const [promoItemProductId, setPromoItemProductId] = useState('');
+  const [promoItemQty, setPromoItemQty] = useState('');
+
   // Escáner
   const [permission, requestPermission] = useCameraPermissions();
   const [showCamera, setShowCamera] = useState(false);
@@ -156,6 +178,7 @@ export default function App() {
   const [paymentMethod, setPaymentMethod] = useState('Efectivo');
   const [amountMP, setAmountMP] = useState('');
   const [cashTendered, setCashTendered] = useState('');
+  const [activePromotionSale, setActivePromotionSale] = useState(null); // { promotion, calculation, items }
 
   // TICKET / COMPROBANTE & HISTORIAL DE VENTAS
   const [lastTicket, setLastTicket] = useState(null);
@@ -223,9 +246,19 @@ export default function App() {
   const [editIngressReason, setEditIngressReason] = useState("");
 
 
+  const loadPromotions = async () => {
+    try {
+      const data = await fetchPromotions(branchId || 1);
+      setPromotions(data || []);
+    } catch (e) {
+      console.log('Error cargando promociones:', e.message);
+    }
+  };
+
   const loadInitialData = async () => {
     try {
       setProducts(await fetchProducts(branchId || 1));
+      await loadPromotions();
       const users = await fetchUsers();
       setUsersList(users);
       if (users.length > 1) {
@@ -831,10 +864,15 @@ export default function App() {
     setSearchQueryCashier('');
   };
 
-  const getCashierTotal = () => cashierCart.reduce((acc, i) => {
-    const qtyVal = parseFloat(String(i.qty).replace(',', '.')) || 0;
-    return acc + (i.price_per_unit * qtyVal);
-  }, 0).toFixed(2);
+  const getCashierTotal = () => {
+    if (activePromotionSale && promotionCalculation) {
+      return Number(promotionCalculation.final_total || 0).toFixed(2);
+    }
+    return cashierCart.reduce((acc, i) => {
+      const qtyVal = parseFloat(String(i.qty).replace(',', '.')) || 0;
+      return acc + (i.price_per_unit * qtyVal);
+    }, 0).toFixed(2);
+  };
 
   const getRequiredCash = () => {
     const total = parseFloat(getCashierTotal()) || 0;
@@ -850,8 +888,174 @@ export default function App() {
     return change > 0 ? change.toFixed(2) : '0.00';
   };
 
+  const handleSelectPromotionForSale = async (promo) => {
+    try {
+      setPromotionLoading(true);
+      const detail = await fetchPromotionDetail(promo.id, branchId || 1);
+      setSelectedPromotion(detail);
+      const itemsInit = (detail.items || []).map(i => ({
+        product_id: i.product_id,
+        name: i.product_name || i.name,
+        unit_type: i.unit_type || 'unid',
+        included_qty: i.included_qty,
+        actual_qty: String(i.included_qty)
+      }));
+      setPromotionItems(itemsInit);
+      setPromotionCalculation(null);
+    } catch (e) {
+      alert(e.message || 'Error al obtener promoción');
+    } finally {
+      setPromotionLoading(false);
+    }
+  };
+
+  const handleCalculatePromotion = async () => {
+    if (!selectedPromotion) return alert('Seleccioná una promoción');
+    for (const pi of promotionItems) {
+      const q = parseFloat(String(pi.actual_qty).replace(',', '.'));
+      if (!Number.isFinite(q) || q <= 0) {
+        return alert(`Ingresá una cantidad real válida para ${pi.name}`);
+      }
+    }
+    try {
+      setPromotionLoading(true);
+      const payloadItems = promotionItems.map(i => ({
+        product_id: i.product_id,
+        actual_qty: parseFloat(String(i.actual_qty).replace(',', '.'))
+      }));
+      const calc = await calculatePromotion(selectedPromotion.id, payloadItems, branchId || 1);
+      setPromotionCalculation(calc);
+    } catch (e) {
+      alert(e.message || 'Error al calcular promoción');
+    } finally {
+      setPromotionLoading(false);
+    }
+  };
+
+  const handlePassPromotionToCash = () => {
+    if (!selectedPromotion || !promotionCalculation) return alert('Calculá la promoción primero');
+    const promoSaleData = {
+      promotion: selectedPromotion,
+      calculation: promotionCalculation,
+      items: promotionItems
+    };
+    setActivePromotionSale(promoSaleData);
+    setCashierCart([]);
+    setSelectedPreSaleId(null);
+    setCurrentTab('caja');
+  };
+
   const handleFinalizeSale = async () => {
     if (!cashStatus.is_open) return alert('⚠️ Abrí la caja antes de procesar ventas.');
+    
+    if (activePromotionSale) {
+      const total = parseFloat(promotionCalculation.final_total);
+      let cash = 0, mp = 0;
+      let cashReceivedVal = null;
+      let changeAmountVal = 0.0;
+
+      if (paymentMethod === 'Efectivo') {
+        cash = total;
+        const tenderedNum = parseFloat(cashTendered) || 0;
+        if (tenderedNum < total) return alert(`⚠️ Dinero insuficiente`);
+        cashReceivedVal = tenderedNum;
+        changeAmountVal = parseFloat(getChangeDue()) || 0.0;
+      } else if (paymentMethod === 'Mercado Pago') {
+        mp = total;
+        cashReceivedVal = null;
+        changeAmountVal = 0.0;
+      } else {
+        mp = parseFloat(amountMP) || 0;
+        if (mp > total) return alert(`⚠️ Monto MP supera el total`);
+        cash = total - mp;
+        if (cash > 0) {
+          const tenderedNum = parseFloat(cashTendered) || 0;
+          if (tenderedNum < cash) return alert(`⚠️ Dinero insuficiente en efectivo`);
+          cashReceivedVal = tenderedNum;
+          changeAmountVal = parseFloat(getChangeDue()) || 0.0;
+        } else {
+          cashReceivedVal = null;
+          changeAmountVal = 0.0;
+        }
+      }
+
+      const currentPromoSnapshot = activePromotionSale;
+      const currentSoldBy = email;
+      const currentPaymentMethod = paymentMethod;
+      const currentCash = cash;
+      const currentMp = mp;
+
+      try {
+        setLoading(true);
+        const saleDataPayload = {
+          presale_id: null,
+          items: currentPromoSnapshot.calculation.items.map(i => ({
+            product_id: i.product_id,
+            quantity: i.actual_qty,
+            unit_type: i.unit_type || 'unid'
+          })),
+          total_amount: total,
+          amount_cash: currentCash,
+          amount_mp: currentMp,
+          payment_method: currentPaymentMethod,
+          sold_by: currentSoldBy,
+          cash_received: cashReceivedVal,
+          change_amount: changeAmountVal,
+          is_promotion: true,
+          promotion_id: currentPromoSnapshot.promotion.id
+        };
+
+        const saleResult = await finalizeSale(saleDataPayload, branchId || 1);
+
+        let fetchedDetail = null;
+        if (saleResult && saleResult.sale_id) {
+          try {
+            fetchedDetail = await fetchSaleDetail(saleResult.sale_id, branchId || 1);
+          } catch (eDetail) {
+            fetchedDetail = null;
+          }
+        }
+
+        const finalTicketObj = fetchedDetail || {
+          id: saleResult?.sale_id || 'N/A',
+          branch_id: branchId || 1,
+          created_at: new Date().toISOString(),
+          total_amount: total,
+          amount_cash: currentCash,
+          amount_mp: currentMp,
+          payment_method: currentPaymentMethod,
+          cash_received: cashReceivedVal,
+          change_amount: changeAmountVal,
+          sold_by: currentSoldBy,
+          is_promotion: true,
+          promotion_name: currentPromoSnapshot.promotion.name,
+          items: currentPromoSnapshot.calculation.items.map(i => ({
+            product_id: i.product_id,
+            product_name: i.product_name || i.name,
+            quantity: i.actual_qty,
+            unit_type: i.unit_type || 'unid',
+            unit_price: i.unit_price || 0,
+            subtotal: i.subtotal || 0
+          }))
+        };
+
+        setLastTicket(finalTicketObj);
+        setActivePromotionSale(null);
+        setSelectedPromotion(null);
+        setPromotionItems([]);
+        setPromotionCalculation(null);
+        setSalesMode('normal');
+        setAmountMP('');
+        setCashTendered('');
+        await loadInitialData();
+      } catch (e) {
+        alert(e.message || 'Error procesando venta promocional');
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     if (cashierCart.length === 0) return alert('Ticket de caja vacío');
     for (const item of cashierCart) {
       const qNum = parseFloat(String(item.qty).replace(',', '.')) || 0;
@@ -976,6 +1180,9 @@ export default function App() {
     if (!ticket) return '';
     const bizName = ticket.branch_id === 2 ? 'Feria Damyale' : 'Fiambrería Local';
     const dateStr = ticket.created_at ? new Date(ticket.created_at).toLocaleString('es-AR') : '';
+    const isPromo = ticket.is_promotion;
+    const promoTitleHtml = isPromo ? `<div class="subtitle" style="color: #6f42c1;">PROMOCIÓN: ${ticket.promotion_name || 'Especial'}</div>` : '';
+
     const itemsHtml = (ticket.items || []).map(item => {
       const qNum = Number(item.quantity || 0);
       const isKg = item.unit_type === 'kg';
@@ -985,7 +1192,7 @@ export default function App() {
         <div class="item-row">
           <div class="item-name">${item.product_name || item.name || 'Producto'}</div>
           <div class="item-details">
-            <span>${qFormatted} x ${formatMoney(item.unit_price)}</span>
+            <span>${qFormatted}${item.unit_price > 0 ? ` x ${formatMoney(item.unit_price)}` : ''}</span>
             <span style="font-weight: bold;">${formatMoney(sub)}</span>
           </div>
         </div>
@@ -1034,6 +1241,7 @@ export default function App() {
           <div class="center">
             <div class="title">${bizName}</div>
             <div class="subtitle">COMPROBANTE DE VENTA</div>
+            ${promoTitleHtml}
           </div>
           <div class="info">
             <div>Venta N°: ${ticket.id}</div>
@@ -1137,6 +1345,7 @@ export default function App() {
     setViewingTicket(null);
     setSelectedPreSaleId(null);
     setCashierCart([]);
+    setActivePromotionSale(null);
   };
 
   const handleCashMovement = async () => {
@@ -1268,6 +1477,143 @@ export default function App() {
       alert(`Rol de ${user.name} cambiado a ${newRole.toUpperCase()}`);
     } catch (e) { alert('Error cambiando rol'); }
     finally { setLoading(false); }
+  };
+
+  // Funciones para gestión de promociones en admin
+  const openCreatePromotionModal = () => {
+    setEditingPromotionId(null);
+    setPromoFormName('');
+    setPromoFormDesc('');
+    setPromoFormEnabled(true);
+    setPromoFormItems([]);
+    setPromoFormPriceB1('');
+    setPromoFormEnabledB1(true);
+    setPromoFormPriceB2('');
+    setPromoFormEnabledB2(true);
+    setShowPromotionAdmin(true);
+  };
+
+  const openEditPromotionModal = (promo) => {
+    setEditingPromotionId(promo.id);
+    setPromoFormName(promo.name || '');
+    setPromoFormDesc(promo.description || '');
+    setPromoFormEnabled(promo.is_active ?? true);
+    
+    const itemsMapped = (promo.items || []).map(i => ({
+      product_id: i.product_id,
+      name: i.product_name || i.name,
+      unit_type: i.unit_type || 'unid',
+      included_qty: i.included_qty
+    }));
+    setPromoFormItems(itemsMapped);
+
+    const b1 = (promo.branches || []).find(b => b.branch_id === 1);
+    setPromoFormPriceB1(b1 && b1.price != null ? String(b1.price) : '');
+    setPromoFormEnabledB1(b1 ? !!b1.is_enabled : true);
+
+    const b2 = (promo.branches || []).find(b => b.branch_id === 2);
+    setPromoFormPriceB2(b2 && b2.price != null ? String(b2.price) : '');
+    setPromoFormEnabledB2(b2 ? !!b2.is_enabled : true);
+
+    setShowPromotionAdmin(true);
+  };
+
+  const addPromoItemToDraft = () => {
+    if (!promoItemProductId || !promoItemQty) return alert('Seleccioná producto y cantidad');
+    const q = parseFloat(String(promoItemQty).replace(',', '.'));
+    if (!Number.isFinite(q) || q <= 0) return alert('Cantidad inválida');
+    const prod = products.find(p => p.id === Number(promoItemProductId));
+    if (!prod) return alert('Producto no encontrado');
+
+    if (promoFormItems.some(i => i.product_id === prod.id)) {
+      return alert('El producto ya está agregado en la promoción');
+    }
+
+    setPromoFormItems([...promoFormItems, {
+      product_id: prod.id,
+      name: prod.name,
+      unit_type: prod.unit_type || 'unid',
+      included_qty: q
+    }]);
+    setPromoItemProductId('');
+    setPromoItemQty('');
+  };
+
+  const removePromoItemFromDraft = (productId) => {
+    setPromoFormItems(promoFormItems.filter(i => i.product_id !== productId));
+  };
+
+  const handleSavePromotion = async () => {
+    if (!promoFormName.trim()) return alert('El nombre es obligatorio');
+    if (promoFormItems.length === 0) return alert('Agregá al menos un componente');
+
+    const p1 = parseFloat(String(promoFormPriceB1 || '').replace(',', '.'));
+    const p2 = parseFloat(String(promoFormPriceB2 || '').replace(',', '.'));
+
+    if ((promoFormEnabledB1 && (!Number.isFinite(p1) || p1 < 0)) || (promoFormEnabledB2 && (!Number.isFinite(p2) || p2 < 0))) {
+      return alert('Precio de promoción inválido para las sucursales habilitadas');
+    }
+
+    const payload = {
+      name: promoFormName.trim(),
+      description: promoFormDesc.trim() || null,
+      is_active: promoFormEnabled,
+      items: promoFormItems.map(i => ({
+        product_id: i.product_id,
+        included_qty: i.included_qty
+      })),
+      branches: [
+        {
+          branch_id: 1,
+          price: promoFormPriceB1 !== '' ? p1 : 0,
+          is_enabled: promoFormEnabledB1
+        },
+        {
+          branch_id: 2,
+          price: promoFormPriceB2 !== '' ? p2 : 0,
+          is_enabled: promoFormEnabledB2
+        }
+      ]
+    };
+
+    try {
+      setLoading(true);
+      if (editingPromotionId) {
+        await updatePromotion(editingPromotionId, payload);
+        alert('✅ Promoción actualizada');
+      } else {
+        await createPromotion(payload);
+        alert('✅ Promoción creada');
+      }
+      setShowPromotionAdmin(false);
+      await loadPromotions();
+    } catch (e) {
+      alert(e.message || 'Error al guardar promoción');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteOrDisablePromotion = async (promo) => {
+    alert('¿Estás seguro de desactivar/eliminar esta promoción?', '', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Desactivar',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            setLoading(true);
+            await deletePromotion(promo.id);
+            alert('Promoción desactivada');
+            await loadPromotions();
+          } catch (e) {
+            alert(e.message || 'Error al desactivar');
+          } finally {
+            setLoading(false);
+          }
+        }
+      }
+    ]);
   };
 
   // Helper unificado para obtener productos filtrados en el Listado de Stock y Precios
@@ -1565,6 +1911,11 @@ return (
                 <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#28a745', textAlign: 'center', marginBottom: 4 }}>
                   {isHistorical ? `🧾 Comprobante Histórico #${ticketToShow.id}` : `✅ Venta #${ticketToShow.id} realizada`}
                 </Text>
+                {ticketToShow.is_promotion && (
+                  <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#6f42c1', textAlign: 'center', marginBottom: 4 }}>
+                    🎁 PROMOCIÓN: {ticketToShow.promotion_name || 'Especial'}
+                  </Text>
+                )}
                 <Text style={{ fontSize: 11, color: '#666', textAlign: 'center', marginBottom: 12 }}>
                   {ticketToShow.created_at ? new Date(ticketToShow.created_at).toLocaleString('es-AR') : ''} · {ticketToShow.branch_id === 2 ? 'Feria Damyale' : 'Fiambrería Local'}
                 </Text>
@@ -1580,7 +1931,7 @@ return (
                       <View key={idx} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
                         <View style={{ flex: 1, marginRight: 8 }}>
                           <Text style={{ fontWeight: 'bold', fontSize: 12 }}>{item.product_name || item.name || 'Producto'}</Text>
-                          <Text style={{ fontSize: 11, color: '#555' }}>{qFormatted} x {formatMoney(item.unit_price)}</Text>
+                          <Text style={{ fontSize: 11, color: '#555' }}>{qFormatted}{item.unit_price > 0 ? ` x ${formatMoney(item.unit_price)}` : ''}</Text>
                         </View>
                         <Text style={{ fontWeight: 'bold', fontSize: 12 }}>{formatMoney(sub)}</Text>
                       </View>
@@ -1634,83 +1985,202 @@ return (
           );
         })()}
 
-        {/* PRE-VENTA */}
+        {/* PRE-VENTA / VENTAS & PROMOCIONES */}
         {currentTab === 'preventa' && !lastTicket && !viewingTicket && (canPreventa || isAdminLevel) && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>🛒 Pre-venta (Mostrador)</Text>
 
-            <TouchableOpacity style={styles.buttonCamera} onPress={() => toggleCamera('preventa')}>
-              <Text style={styles.buttonText}>{showCamera && cameraTarget === 'preventa' ? '📷 Cerrar Escáner' : '📷 Escanear EAN con Cámara'}</Text>
-            </TouchableOpacity>
+            {/* Alternador de Modo de Venta */}
+            <View style={{ flexDirection: 'row', marginBottom: 15, backgroundColor: '#e9ecef', borderRadius: 8, padding: 3 }}>
+              <TouchableOpacity 
+                style={[{ flex: 1, padding: 10, alignItems: 'center', borderRadius: 6 }, salesMode === 'normal' && { backgroundColor: '#007bff' }]}
+                onPress={() => { setSalesMode('normal'); setSelectedPromotion(null); setPromotionCalculation(null); }}
+              >
+                <Text style={{ fontWeight: 'bold', color: salesMode === 'normal' ? '#fff' : '#333' }}>🛒 Venta normal</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[{ flex: 1, padding: 10, alignItems: 'center', borderRadius: 6 }, salesMode === 'promotions' && { backgroundColor: '#6f42c1' }]}
+                onPress={() => { setSalesMode('promotions'); setSelectedPromotion(null); setPromotionCalculation(null); loadPromotions(); }}
+              >
+                <Text style={{ fontWeight: 'bold', color: salesMode === 'promotions' ? '#fff' : '#333' }}>🎁 Promociones</Text>
+              </TouchableOpacity>
+            </View>
 
-            {showCamera && cameraTarget === 'preventa' && permission?.granted && (
-              <View style={styles.cameraContainer}>
-                <CameraView style={StyleSheet.absoluteFillObject} facing="back" onBarcodeScanned={scanned ? undefined : handleBarcodeScanned} />
-              </View>
+            {isAdminLevel && (
+              <TouchableOpacity style={{ backgroundColor: '#6f42c1', padding: 10, borderRadius: 8, alignItems: 'center', marginBottom: 15 }} onPress={openCreatePromotionModal}>
+                <Text style={{ color: '#fff', fontWeight: 'bold' }}>⚙️ Administrar promociones</Text>
+              </TouchableOpacity>
             )}
 
-            <Text style={styles.subSectionTitle}>🔍 Buscar Producto:</Text>
-            <TextInput style={styles.searchInput} placeholder="Buscar por nombre..." value={searchQueryVendor} onChangeText={setSearchQueryVendor} />
+            {salesMode === 'normal' ? (
+              <>
+                <TouchableOpacity style={styles.buttonCamera} onPress={() => toggleCamera('preventa')}>
+                  <Text style={styles.buttonText}>{showCamera && cameraTarget === 'preventa' ? '📷 Cerrar Escáner' : '📷 Escanear EAN con Cámara'}</Text>
+                </TouchableOpacity>
 
-            {searchQueryVendor.trim() !== '' && (
-              <View style={styles.dropdownContainer}>
-                {filteredProductsVendor.length === 0 ? (
-                  <Text style={{ padding: 10, color: '#888' }}>Sin coincidencias.</Text>
+                {showCamera && cameraTarget === 'preventa' && permission?.granted && (
+                  <View style={styles.cameraContainer}>
+                    <CameraView style={StyleSheet.absoluteFillObject} facing="back" onBarcodeScanned={scanned ? undefined : handleBarcodeScanned} />
+                  </View>
+                )}
+
+                <Text style={styles.subSectionTitle}>🔍 Buscar Producto:</Text>
+                <TextInput style={styles.searchInput} placeholder="Buscar por nombre..." value={searchQueryVendor} onChangeText={setSearchQueryVendor} />
+
+                {searchQueryVendor.trim() !== '' && (
+                  <View style={styles.dropdownContainer}>
+                    {filteredProductsVendor.length === 0 ? (
+                      <Text style={{ padding: 10, color: '#888' }}>Sin coincidencias.</Text>
+                    ) : (
+                      filteredProductsVendor.map(p => (
+                        <TouchableOpacity key={p.id} style={styles.dropdownItem} onPress={() => addToVendorCart(p)}>
+                          <Text style={{ fontWeight: 'bold' }}>{p.name}</Text>
+                          <Text style={{ color: '#28a745', fontSize: 12 }}>{formatMoney(p.price_per_unit)} / {p.unit_type} | Stock: {p.stock} {p.unit_type}</Text>
+                        </TouchableOpacity>
+                      ))
+                    )}
+                  </View>
+                )}
+
+                <Text style={styles.subSectionTitle}>Comanda de Pre-venta:</Text>
+                {vendorCart.length === 0 ? <Text style={styles.emptyText}>Sin productos seleccionados</Text> : (
+                  vendorCart.map(i => {
+                    const qtyVal = parseFloat(String(i.qty).replace(',', '.')) || 0;
+                    return (
+                      <View key={i.id} style={styles.cartRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontWeight: 'bold' }}>{i.name}</Text>
+                          <Text style={{ fontSize: 11, color: '#666' }}>{formatMoney(i.price_per_unit)} / {i.unit_type}</Text>
+                        </View>
+
+                        {i.unit_type === 'kg' ? (
+                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <View style={{ alignItems: 'flex-end', marginRight: 6 }}>
+                              <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#555' }}>Peso (kg)</Text>
+                              <TextInput style={styles.inputSmall} keyboardType="numeric" value={String(i.qty)} onChangeText={(val) => updateVendorCartDirectQty(i.id, val)} />
+                            </View>
+                            <Text style={{ fontSize: 11, marginRight: 8, color: '#444' }}>kg</Text>
+                          </View>
+                        ) : (
+                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <TouchableOpacity style={styles.qtyBtn} onPress={() => updateVendorCartQty(i.id, -1)}>
+                              <Text style={{ color: '#fff', fontWeight: 'bold' }}>-</Text>
+                            </TouchableOpacity>
+
+                            <TextInput style={styles.inputSmall} keyboardType="numeric" value={String(i.qty)} onChangeText={(val) => updateVendorCartDirectQty(i.id, val)} />
+
+                            <TouchableOpacity style={styles.qtyBtn} onPress={() => updateVendorCartQty(i.id, 1)}>
+                              <Text style={{ color: '#fff', fontWeight: 'bold' }}>+</Text>
+                            </TouchableOpacity>
+
+                            <Text style={{ fontSize: 11, marginLeft: 4, marginRight: 8, color: '#444' }}>{i.unit_type}</Text>
+                          </View>
+                        )}
+
+                        <Text style={{ fontWeight: 'bold' }}>{formatMoney(i.price_per_unit * qtyVal)}</Text>
+                      </View>
+                    );
+                  })
+                )}
+
+                <TouchableOpacity style={styles.buttonPrimary} onPress={handleGeneratePreSale} disabled={loading}>
+                  <Text style={styles.buttonText}>📝 Enviar Pre-venta a Caja</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              /* MODO PROMOCIONES */
+              <View>
+                {!selectedPromotion ? (
+                  <>
+                    <Text style={styles.subSectionTitle}>🎁 Promociones activas ({branchName})</Text>
+                    {promotions.length === 0 ? (
+                      <Text style={styles.emptyText}>No hay promociones activas en esta sucursal.</Text>
+                    ) : (
+                      promotions.map(promo => {
+                        const branchInfo = (promo.branches || []).find(b => b.branch_id === (branchId || 1));
+                        const promoPrice = branchInfo ? branchInfo.price : promo.base_price;
+                        return (
+                          <TouchableOpacity key={promo.id} style={[styles.card, { borderWidth: 1, borderColor: '#6f42c1' }]} onPress={() => handleSelectPromotionForSale(promo)}>
+                            <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#6f42c1' }}>🎁 {promo.name}</Text>
+                            {promo.description ? <Text style={{ fontSize: 12, color: '#555', marginTop: 2 }}>{promo.description}</Text> : null}
+                            <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#28a745', marginTop: 6 }}>Precio base: {formatMoney(promoPrice)}</Text>
+                            <Text style={{ fontSize: 12, fontWeight: 'bold', marginTop: 8, color: '#333' }}>Componentes:</Text>
+                            {(promo.items || []).map((ci, idx) => {
+                              const qtyFormatted = ci.unit_type === 'kg' ? `${ci.included_qty >= 1 ? ci.included_qty : ci.included_qty * 1000} ${ci.included_qty >= 1 && ci.included_qty % 1 === 0 ? 'kg' : 'g'}` : `${ci.included_qty} unid`;
+                              return (
+                                <Text key={idx} style={{ fontSize: 11, color: '#555', marginLeft: 6 }}>• {qtyFormatted} de {ci.product_name || ci.name || `Producto #${ci.product_id}`}</Text>
+                              );
+                            })}
+                          </TouchableOpacity>
+                        );
+                      })
+                    )}
+                  </>
                 ) : (
-                  filteredProductsVendor.map(p => (
-                    <TouchableOpacity key={p.id} style={styles.dropdownItem} onPress={() => addToVendorCart(p)}>
-                      <Text style={{ fontWeight: 'bold' }}>{p.name}</Text>
-                      <Text style={{ color: '#28a745', fontSize: 12 }}>{formatMoney(p.price_per_unit)} / {p.unit_type} | Stock: {p.stock} {p.unit_type}</Text>
+                  <View style={styles.card}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#6f42c1' }}>🎁 {selectedPromotion.name}</Text>
+                      <TouchableOpacity onPress={() => { setSelectedPromotion(null); setPromotionCalculation(null); }}>
+                        <Text style={{ color: '#007bff', fontWeight: 'bold' }}>← Volver</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {selectedPromotion.description ? <Text style={{ fontSize: 12, color: '#555', marginBottom: 10 }}>{selectedPromotion.description}</Text> : null}
+
+                    <Text style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 8 }}>Componentes y cantidad REAL entregada:</Text>
+                    {promotionItems.map((pi, idx) => {
+                      const incFormatted = pi.unit_type === 'kg' ? `${pi.included_qty * 1000} g` : `${pi.included_qty} unid`;
+                      return (
+                        <View key={idx} style={{ backgroundColor: '#f8f9fa', padding: 10, borderRadius: 8, marginBottom: 8 }}>
+                          <Text style={{ fontWeight: 'bold', fontSize: 13 }}>{pi.name}</Text>
+                          <Text style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>Incluye: {incFormatted}</Text>
+                          <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#444' }}>Peso real ({pi.unit_type === 'kg' ? 'kg' : 'unid'}):</Text>
+                          <TextInput 
+                            style={styles.inputHighlight} 
+                            keyboardType="numeric" 
+                            value={String(pi.actual_qty)} 
+                            onChangeText={(val) => {
+                              const updated = [...promotionItems];
+                              updated[idx].actual_qty = val;
+                              setPromotionItems(updated);
+                            }} 
+                          />
+                        </View>
+                      );
+                    })}
+
+                    <TouchableOpacity style={[styles.buttonPrimary, { backgroundColor: '#6f42c1' }]} onPress={handleCalculatePromotion} disabled={promotionLoading}>
+                      <Text style={styles.buttonText}>{promotionLoading ? 'Calculando...' : '🧮 Calcular promoción'}</Text>
                     </TouchableOpacity>
-                  ))
+
+                    {promotionCalculation && (
+                      <View style={{ marginTop: 15, padding: 12, backgroundColor: '#e8f4f8', borderRadius: 8, borderWidth: 1, borderColor: '#b8daff' }}>
+                        <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#333' }}>Precio base: {formatMoney(promotionCalculation.promo_price)}</Text>
+                        <Text style={{ fontSize: 14, fontWeight: 'bold', color: promotionCalculation.total_extra > 0 ? '#dc3545' : '#333' }}>Excedentes: {formatMoney(promotionCalculation.total_extra)}</Text>
+                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#28a745', marginTop: 4 }}>TOTAL: {formatMoney(promotionCalculation.final_total)}</Text>
+
+                        {(promotionCalculation.items || []).map((itemRes, rIdx) => {
+                          if (itemRes.extra_qty > 0) {
+                            const unitLabel = itemRes.unit_type === 'kg' ? `${Math.round(itemRes.extra_qty * 1000)} g` : `${itemRes.extra_qty} unid`;
+                            return (
+                              <View key={rIdx} style={{ marginTop: 6, borderTopWidth: 1, borderTopColor: '#bee5eb', paddingTop: 6 }}>
+                                <Text style={{ fontSize: 12, fontWeight: 'bold' }}>{itemRes.product_name || itemRes.name}:</Text>
+                                <Text style={{ fontSize: 11, color: '#555' }}>Incluido {itemRes.included_qty} — Real {itemRes.actual_qty} — Excedente {unitLabel}</Text>
+                                <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#dc3545' }}>+{formatMoney(itemRes.extra_price)}</Text>
+                              </View>
+                            );
+                          }
+                          return null;
+                        })}
+
+                        <TouchableOpacity style={[styles.buttonSuccess, { marginTop: 12 }]} onPress={handlePassPromotionToCash}>
+                          <Text style={styles.buttonText}>💳 Pasar promoción a Caja</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
                 )}
               </View>
             )}
-
-            <Text style={styles.subSectionTitle}>Comanda de Pre-venta:</Text>
-            {vendorCart.length === 0 ? <Text style={styles.emptyText}>Sin productos seleccionados</Text> : (
-              vendorCart.map(i => {
-                const qtyVal = parseFloat(String(i.qty).replace(',', '.')) || 0;
-                return (
-                  <View key={i.id} style={styles.cartRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontWeight: 'bold' }}>{i.name}</Text>
-                      <Text style={{ fontSize: 11, color: '#666' }}>{formatMoney(i.price_per_unit)} / {i.unit_type}</Text>
-                    </View>
-
-                    {i.unit_type === 'kg' ? (
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <View style={{ alignItems: 'flex-end', marginRight: 6 }}>
-                          <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#555' }}>Peso (kg)</Text>
-                          <TextInput style={styles.inputSmall} keyboardType="numeric" value={String(i.qty)} onChangeText={(val) => updateVendorCartDirectQty(i.id, val)} />
-                        </View>
-                        <Text style={{ fontSize: 11, marginRight: 8, color: '#444' }}>kg</Text>
-                      </View>
-                    ) : (
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <TouchableOpacity style={styles.qtyBtn} onPress={() => updateVendorCartQty(i.id, -1)}>
-                          <Text style={{ color: '#fff', fontWeight: 'bold' }}>-</Text>
-                        </TouchableOpacity>
-
-                        <TextInput style={styles.inputSmall} keyboardType="numeric" value={String(i.qty)} onChangeText={(val) => updateVendorCartDirectQty(i.id, val)} />
-
-                        <TouchableOpacity style={styles.qtyBtn} onPress={() => updateVendorCartQty(i.id, 1)}>
-                          <Text style={{ color: '#fff', fontWeight: 'bold' }}>+</Text>
-                        </TouchableOpacity>
-
-                        <Text style={{ fontSize: 11, marginLeft: 4, marginRight: 8, color: '#444' }}>{i.unit_type}</Text>
-                      </View>
-                    )}
-
-                    <Text style={{ fontWeight: 'bold' }}>{formatMoney(i.price_per_unit * qtyVal)}</Text>
-                  </View>
-                );
-              })
-            )}
-
-            <TouchableOpacity style={styles.buttonPrimary} onPress={handleGeneratePreSale} disabled={loading}>
-              <Text style={styles.buttonText}>📝 Enviar Pre-venta a Caja</Text>
-            </TouchableOpacity>
           </ScrollView>
         )}
 
@@ -1820,83 +2290,111 @@ return (
                   <TouchableOpacity style={styles.buttonDanger} onPress={handleStockLoss} disabled={loading}><Text style={styles.buttonText}>Registrar merma / pérdida</Text></TouchableOpacity>
                 </View>
 
-                <Text style={styles.subSectionTitle}>Pre-ventas Pendientes:</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 15 }}>
-                  {pendingPreSales.length === 0 ? <Text style={styles.emptyText}>Sin pre-ventas pendientes.</Text> : (
-                    pendingPreSales.map(ps => (
-                      <View key={ps.id} style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <TouchableOpacity style={[styles.preSaleBadge, selectedPreSaleId === ps.id && styles.preSaleBadgeActive]} onPress={() => handleSelectPreSale(ps)}>
-                          <Text style={{ fontWeight: 'bold', color: selectedPreSaleId === ps.id ? '#fff' : '#007bff' }}>
-                            Ticket #{ps.id} ({ps.created_at})
-                          </Text>
-                          <Text style={{ color: selectedPreSaleId === ps.id ? '#fff' : '#333' }}>{formatMoney(ps.total)}</Text>
-                        </TouchableOpacity>
-
-                        {(canEditRecords || isAdminLevel) && (
-                          <TouchableOpacity style={{ backgroundColor: '#dc3545', padding: 8, borderRadius: 6, marginRight: 12 }} onPress={() => handleCancelPreSale(ps.id)}>
-                            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 11 }}>❌ Borrar</Text>
-                          </TouchableOpacity>
-                        )}
-                      </View>
-                    ))
-                  )}
-                </ScrollView>
-
-                <TouchableOpacity style={styles.buttonCamera} onPress={() => toggleCamera('caja')}>
-                  <Text style={styles.buttonText}>{showCamera && cameraTarget === 'caja' ? '📷 Cerrar Escáner' : '📷 Escanear Producto EAN'}</Text>
-                </TouchableOpacity>
-
-                {showCamera && cameraTarget === 'caja' && permission?.granted && (
-                  <View style={styles.cameraContainer}>
-                    <CameraView style={StyleSheet.absoluteFillObject} facing="back" onBarcodeScanned={scanned ? undefined : handleBarcodeScanned} />
-                  </View>
-                )}
-
-                <Text style={styles.subSectionTitle}>🔍 Buscar Producto Adicional:</Text>
-                <TextInput style={styles.searchInput} placeholder="Buscar..." value={searchQueryCashier} onChangeText={setSearchQueryCashier} />
-
-                {searchQueryCashier.trim() !== '' && (
-                  <View style={styles.dropdownContainer}>
-                    {filteredProductsCashier.map(p => (
-                      <TouchableOpacity key={p.id} style={styles.dropdownItem} onPress={() => addToCashierCart(p)}>
-                        <Text style={{ fontWeight: 'bold' }}>{p.name}</Text>
-                        <Text style={{ color: '#28a745', fontSize: 12 }}>{formatMoney(p.price_per_unit)} / {p.unit_type} | Stock: {p.stock} {p.unit_type}</Text>
+                {activePromotionSale ? (
+                  <View style={[styles.card, { borderWidth: 2, borderColor: '#6f42c1', backgroundColor: '#fdfcfe' }]}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <Text style={{ fontWeight: 'bold', fontSize: 16, color: '#6f42c1' }}>🎁 PROMOCIÓN: {activePromotionSale.promotion.name}</Text>
+                      <TouchableOpacity onPress={() => setActivePromotionSale(null)}>
+                        <Text style={{ color: '#dc3545', fontWeight: 'bold' }}>✕ Cancelar</Text>
                       </TouchableOpacity>
-                    ))}
-                  </View>
-                )}
-
-                <Text style={styles.subSectionTitle}>Edición de Ticket:</Text>
-                {cashierCart.map(i => {
-                  const qtyVal = parseFloat(String(i.qty).replace(',', '.')) || 0;
-                  return (
-                    <View key={i.id} style={styles.cartRow}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ fontWeight: 'bold' }}>{i.name}</Text>
-                        <Text style={{ fontSize: 11, color: '#666' }}>{formatMoney(i.price_per_unit)} / {i.unit_type}</Text>
-                      </View>
-
-                      {i.unit_type === 'kg' ? (
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                          <View style={{ alignItems: 'flex-end', marginRight: 6 }}>
-                            <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#555' }}>Peso (kg)</Text>
-                            <TextInput style={styles.inputSmall} keyboardType="numeric" value={String(i.qty)} onChangeText={(val) => updateCashierCartDirectQty(i.id, val)} />
-                          </View>
-                          <Text style={{ fontSize: 11, marginRight: 8 }}>kg</Text>
-                        </View>
-                      ) : (
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                          <TouchableOpacity style={styles.qtyBtn} onPress={() => updateCashierCartQty(i.id, -1)}><Text style={{ color: '#fff', fontWeight: 'bold' }}>-</Text></TouchableOpacity>
-                          <TextInput style={styles.inputSmall} keyboardType="numeric" value={String(i.qty)} onChangeText={(val) => updateCashierCartDirectQty(i.id, val)} />
-                          <TouchableOpacity style={styles.qtyBtn} onPress={() => updateCashierCartQty(i.id, 1)}><Text style={{ color: '#fff', fontWeight: 'bold' }}>+</Text></TouchableOpacity>
-                          <Text style={{ fontSize: 11, marginLeft: 4, marginRight: 8 }}>{i.unit_type}</Text>
-                        </View>
-                      )}
-
-                      <Text style={{ fontWeight: 'bold' }}>{formatMoney(i.price_per_unit * qtyVal)}</Text>
                     </View>
-                  );
-                })}
+                    <Text style={{ fontSize: 12, color: '#555', marginBottom: 8 }}>Componentes reales calculados por backend:</Text>
+                    {(activePromotionSale.calculation.items || []).map((ci, cIdx) => {
+                      const qFormatted = ci.unit_type === 'kg' ? `${ci.actual_qty} kg` : `${ci.actual_qty} unid`;
+                      return (
+                        <View key={cIdx} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 }}>
+                          <Text style={{ fontSize: 12 }}>• {ci.product_name || ci.name}</Text>
+                          <Text style={{ fontSize: 12, fontWeight: 'bold' }}>{qFormatted}</Text>
+                        </View>
+                      );
+                    })}
+                    <View style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 6 }}>
+                      <Text style={{ fontSize: 12 }}>Precio base: {formatMoney(activePromotionSale.calculation.promo_price)}</Text>
+                      <Text style={{ fontSize: 12 }}>Excedentes: {formatMoney(activePromotionSale.calculation.total_extra)}</Text>
+                      <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#28a745', marginTop: 2 }}>TOTAL: {formatMoney(activePromotionSale.calculation.final_total)}</Text>
+                    </View>
+                  </View>
+                ) : (
+                  <>
+                    <Text style={styles.subSectionTitle}>Pre-ventas Pendientes:</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 15 }}>
+                      {pendingPreSales.length === 0 ? <Text style={styles.emptyText}>Sin pre-ventas pendientes.</Text> : (
+                        pendingPreSales.map(ps => (
+                          <View key={ps.id} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <TouchableOpacity style={[styles.preSaleBadge, selectedPreSaleId === ps.id && styles.preSaleBadgeActive]} onPress={() => handleSelectPreSale(ps)}>
+                              <Text style={{ fontWeight: 'bold', color: selectedPreSaleId === ps.id ? '#fff' : '#007bff' }}>
+                                Ticket #{ps.id} ({ps.created_at})
+                              </Text>
+                              <Text style={{ color: selectedPreSaleId === ps.id ? '#fff' : '#333' }}>{formatMoney(ps.total)}</Text>
+                            </TouchableOpacity>
+
+                            {(canEditRecords || isAdminLevel) && (
+                              <TouchableOpacity style={{ backgroundColor: '#dc3545', padding: 8, borderRadius: 6, marginRight: 12 }} onPress={() => handleCancelPreSale(ps.id)}>
+                                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 11 }}>❌ Borrar</Text>
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                        ))
+                      )}
+                    </ScrollView>
+
+                    <TouchableOpacity style={styles.buttonCamera} onPress={() => toggleCamera('caja')}>
+                      <Text style={styles.buttonText}>{showCamera && cameraTarget === 'caja' ? '📷 Cerrar Escáner' : '📷 Escanear Producto EAN'}</Text>
+                    </TouchableOpacity>
+
+                    {showCamera && cameraTarget === 'caja' && permission?.granted && (
+                      <View style={styles.cameraContainer}>
+                        <CameraView style={StyleSheet.absoluteFillObject} facing="back" onBarcodeScanned={scanned ? undefined : handleBarcodeScanned} />
+                      </View>
+                    )}
+
+                    <Text style={styles.subSectionTitle}>🔍 Buscar Producto Adicional:</Text>
+                    <TextInput style={styles.searchInput} placeholder="Buscar..." value={searchQueryCashier} onChangeText={setSearchQueryCashier} />
+
+                    {searchQueryCashier.trim() !== '' && (
+                      <View style={styles.dropdownContainer}>
+                        {filteredProductsCashier.map(p => (
+                          <TouchableOpacity key={p.id} style={styles.dropdownItem} onPress={() => addToCashierCart(p)}>
+                            <Text style={{ fontWeight: 'bold' }}>{p.name}</Text>
+                            <Text style={{ color: '#28a745', fontSize: 12 }}>{formatMoney(p.price_per_unit)} / {p.unit_type} | Stock: {p.stock} {p.unit_type}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+
+                    <Text style={styles.subSectionTitle}>Edición de Ticket:</Text>
+                    {cashierCart.map(i => {
+                      const qtyVal = parseFloat(String(i.qty).replace(',', '.')) || 0;
+                      return (
+                        <View key={i.id} style={styles.cartRow}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontWeight: 'bold' }}>{i.name}</Text>
+                            <Text style={{ fontSize: 11, color: '#666' }}>{formatMoney(i.price_per_unit)} / {i.unit_type}</Text>
+                          </View>
+
+                          {i.unit_type === 'kg' ? (
+                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                              <View style={{ alignItems: 'flex-end', marginRight: 6 }}>
+                                <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#555' }}>Peso (kg)</Text>
+                                <TextInput style={styles.inputSmall} keyboardType="numeric" value={String(i.qty)} onChangeText={(val) => updateCashierCartDirectQty(i.id, val)} />
+                              </View>
+                              <Text style={{ fontSize: 11, marginRight: 8 }}>kg</Text>
+                            </View>
+                          ) : (
+                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                              <TouchableOpacity style={styles.qtyBtn} onPress={() => updateCashierCartQty(i.id, -1)}><Text style={{ color: '#fff', fontWeight: 'bold' }}>-</Text></TouchableOpacity>
+                              <TextInput style={styles.inputSmall} keyboardType="numeric" value={String(i.qty)} onChangeText={(val) => updateCashierCartDirectQty(i.id, val)} />
+                              <TouchableOpacity style={styles.qtyBtn} onPress={() => updateCashierCartQty(i.id, 1)}><Text style={{ color: '#fff', fontWeight: 'bold' }}>+</Text></TouchableOpacity>
+                              <Text style={{ fontSize: 11, marginLeft: 4, marginRight: 8 }}>{i.unit_type}</Text>
+                            </View>
+                          )}
+
+                          <Text style={{ fontWeight: 'bold' }}>{formatMoney(i.price_per_unit * qtyVal)}</Text>
+                        </View>
+                      );
+                    })}
+                  </>
+                )}
 
                 <Text style={styles.subSectionTitle}>Método de Pago:</Text>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -2664,6 +3162,69 @@ return (
           </ScrollView>
         )}
       </View>
+
+      {/* MODAL DE ADMINISTRACIÓN DE PROMOCIONES */}
+      {showPromotionAdmin && isAdminLevel && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <Text style={{ fontSize: 18, fontWeight: 'bold' }}>{editingPromotionId ? 'Editar Promoción' : 'Nueva Promoción'}</Text>
+              <TouchableOpacity onPress={() => setShowPromotionAdmin(false)}>
+                <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#dc3545' }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ maxHeight: 400 }}>
+              <TextInput style={styles.input} placeholder="Nombre de la promoción" value={promoFormName} onChangeText={setPromoFormName} />
+              <TextInput style={styles.input} placeholder="Descripción (opcional)" value={promoFormDesc} onChangeText={setPromoFormDesc} />
+
+              <Text style={{ fontWeight: 'bold', marginTop: 8, marginBottom: 4 }}>Componentes:</Text>
+              {promoFormItems.map((item, idx) => (
+                <View key={idx} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f8f9fa', padding: 8, borderRadius: 6, marginBottom: 6 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontWeight: 'bold', fontSize: 12 }}>{item.name}</Text>
+                    <Text style={{ fontSize: 11, color: '#555' }}>Incluye: {item.included_qty} {item.unit_type}</Text>
+                  </View>
+                  <TouchableOpacity onPress={() => removePromoItemFromDraft(item.product_id)}>
+                    <Text style={{ color: '#dc3545', fontWeight: 'bold' }}>Quitar</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+
+              <View style={{ backgroundColor: '#e9ecef', padding: 10, borderRadius: 8, marginBottom: 10 }}>
+                <Text style={{ fontSize: 12, fontWeight: 'bold', marginBottom: 4 }}>Agregar componente:</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 6 }}>
+                  {products.filter(p => p.is_active).map(prod => (
+                    <TouchableOpacity 
+                      key={prod.id} 
+                      style={[styles.typeBtn, { marginRight: 6, paddingHorizontal: 10 }, Number(promoItemProductId) === prod.id && styles.typeBtnActive]}
+                      onPress={() => setPromoItemProductId(String(prod.id))}
+                    >
+                      <Text style={{ fontSize: 11, color: Number(promoItemProductId) === prod.id ? '#fff' : '#333' }}>{prod.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+                <TextInput style={styles.input} placeholder="Cantidad incluida (ej: 0.250 o 1)" keyboardType="numeric" value={promoItemQty} onChangeText={setPromoItemQty} />
+                <TouchableOpacity style={[styles.buttonPrimary, { marginTop: 0 }]} onPress={addPromoItemToDraft}>
+                  <Text style={styles.buttonText}>+ Agregar componente</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={{ fontWeight: 'bold', marginTop: 8, marginBottom: 4 }}>Precios por Sucursal:</Text>
+              
+              <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#555' }}>Sucursal 1 (Fiambrería Local)</Text>
+              <TextInput style={styles.input} placeholder="Precio promoción Sucursal 1" keyboardType="numeric" value={promoFormPriceB1} onChangeText={setPromoFormPriceB1} />
+
+              <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#555' }}>Sucursal 2 (Feria Damyale)</Text>
+              <TextInput style={styles.input} placeholder="Precio promoción Sucursal 2" keyboardType="numeric" value={promoFormPriceB2} onChangeText={setPromoFormPriceB2} />
+
+              <TouchableOpacity style={[styles.buttonSuccess, { marginTop: 15 }]} onPress={handleSavePromotion} disabled={loading}>
+                <Text style={styles.buttonText}>💾 Guardar Promoción</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      )}
 
       {/* MODAL DE HISTORIAL DE VENTAS */}
       {showSalesHistoryModal && (
