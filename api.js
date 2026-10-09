@@ -282,6 +282,27 @@ export const updateIngress = async (ingressId, data, branchId = 1) => {
   return await res.json();
 };
 
+export const fetchIngressHistory = async (
+  branchId = 1,
+  {
+    search = null,
+    dateFrom = null,
+    dateTo = null,
+    limit = 100
+  } = {}
+) => {
+  const q = new URLSearchParams();
+  q.set("branch_id", String(branchId));
+  if (search) q.set("search", search);
+  if (dateFrom) q.set("date_from", dateFrom);
+  if (dateTo) q.set("date_to", dateTo);
+  q.set("limit", String(limit));
+
+  const res = await fetch(`${API_URL}/ingresses/history?${q.toString()}`);
+  if (!res.ok) throw new Error("Error al obtener historial de ingresos");
+  return await res.json();
+};
+
 
 export const createCashMovement = async (data, branchId = 1) => {
   const res = await fetch(`${API_URL}/cash/movements?branch_id=${branchId}`, {
@@ -369,6 +390,75 @@ export const updateReplenishmentPolicy = async (productId,policy,actor,reason=""
   const r=await fetch(`${API_URL}/products/${productId}/replenishment-policy`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({policy,actor,reason})});
   if(!r.ok) throw new Error((await r.json().catch(()=>({}))).detail || "Error cambiando política MRP");
   return await r.json();
+};
+
+// ===== PROMOCIONES =====
+
+export const fetchPromotions = async (branchId = 1) => {
+  const res = await fetch(`${API_URL}/promotions?branch_id=${branchId}`);
+  if (!res.ok) throw new Error("Error al obtener promociones");
+  return await res.json();
+};
+
+export const fetchPromotionDetail = async (promotionId, branchId = 1) => {
+  const res = await fetch(`${API_URL}/promotions/${promotionId}?branch_id=${branchId}`);
+  if (!res.ok) throw new Error("Error al obtener promoción");
+  return await res.json();
+};
+
+export const createPromotion = async (data) => {
+  const res = await fetch(`${API_URL}/promotions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Error al crear promoción");
+  }
+  return await res.json();
+};
+
+export const updatePromotion = async (promotionId, data) => {
+  const res = await fetch(`${API_URL}/promotions/${promotionId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Error al actualizar promoción");
+  }
+  return await res.json();
+};
+
+export const deletePromotion = async (promotionId) => {
+  const res = await fetch(`${API_URL}/promotions/${promotionId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Error al eliminar promoción");
+  }
+  return await res.json();
+};
+
+export const calculatePromotion = async (promotionId, items, branchId = 1) => {
+  const res = await fetch(`${API_URL}/promotions/${promotionId}/calculate?branch_id=${branchId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      items: items.map(i => ({
+        product_id: i.product_id,
+        actual_qty: i.actual_qty
+      }))
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Error al calcular promoción");
+  }
+  return await res.json();
 };
 
 // ===== ADMINISTRACION MULTILOCAL / FERIA =====
