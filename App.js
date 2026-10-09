@@ -71,6 +71,21 @@ export default function App() {
     const n=Number(value || 0);
     return '$'+n.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
   };
+
+  const formatQuantityVisual = (qty, unitType) => {
+    const q = Number(qty || 0);
+    if (unitType === 'kg') {
+      if (q < 1) {
+        return `${Math.round(q * 1000)} g`;
+      }
+      if (q === 1) {
+        return `1 kg`;
+      }
+      return `${q.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 3 })} kg`;
+    }
+    return `${q} unid`;
+  };
+
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userRole, setUserRole] = useState('');
   const [branchId, setBranchId] = useState(null);
@@ -865,8 +880,8 @@ export default function App() {
   };
 
   const getCashierTotal = () => {
-    if (activePromotionSale && promotionCalculation) {
-      return Number(promotionCalculation.final_total || 0).toFixed(2);
+    if (activePromotionSale && activePromotionSale.calculation) {
+      return Number(activePromotionSale.calculation.final_total || 0).toFixed(2);
     }
     return cashierCart.reduce((acc, i) => {
       const qtyVal = parseFloat(String(i.qty).replace(',', '.')) || 0;
@@ -949,7 +964,7 @@ export default function App() {
     if (!cashStatus.is_open) return alert('⚠️ Abrí la caja antes de procesar ventas.');
     
     if (activePromotionSale) {
-      const total = parseFloat(promotionCalculation.final_total);
+      const total = parseFloat(activePromotionSale.calculation.final_total);
       let cash = 0, mp = 0;
       let cashReceivedVal = null;
       let changeAmountVal = 0.0;
@@ -2097,8 +2112,7 @@ return (
                       <Text style={styles.emptyText}>No hay promociones activas en esta sucursal.</Text>
                     ) : (
                       promotions.map(promo => {
-                        const branchInfo = (promo.branches || []).find(b => b.branch_id === (branchId || 1));
-                        const promoPrice = branchInfo ? branchInfo.price : promo.base_price;
+                        const promoPrice = promo.promo_price ?? 0;
                         return (
                           <TouchableOpacity key={promo.id} style={[styles.card, { borderWidth: 1, borderColor: '#6f42c1' }]} onPress={() => handleSelectPromotionForSale(promo)}>
                             <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#6f42c1' }}>🎁 {promo.name}</Text>
@@ -2106,7 +2120,7 @@ return (
                             <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#28a745', marginTop: 6 }}>Precio base: {formatMoney(promoPrice)}</Text>
                             <Text style={{ fontSize: 12, fontWeight: 'bold', marginTop: 8, color: '#333' }}>Componentes:</Text>
                             {(promo.items || []).map((ci, idx) => {
-                              const qtyFormatted = ci.unit_type === 'kg' ? `${ci.included_qty >= 1 ? ci.included_qty : ci.included_qty * 1000} ${ci.included_qty >= 1 && ci.included_qty % 1 === 0 ? 'kg' : 'g'}` : `${ci.included_qty} unid`;
+                              const qtyFormatted = formatQuantityVisual(ci.included_qty, ci.unit_type);
                               return (
                                 <Text key={idx} style={{ fontSize: 11, color: '#555', marginLeft: 6 }}>• {qtyFormatted} de {ci.product_name || ci.name || `Producto #${ci.product_id}`}</Text>
                               );
@@ -2128,7 +2142,7 @@ return (
 
                     <Text style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 8 }}>Componentes y cantidad REAL entregada:</Text>
                     {promotionItems.map((pi, idx) => {
-                      const incFormatted = pi.unit_type === 'kg' ? `${pi.included_qty * 1000} g` : `${pi.included_qty} unid`;
+                      const incFormatted = formatQuantityVisual(pi.included_qty, pi.unit_type);
                       return (
                         <View key={idx} style={{ backgroundColor: '#f8f9fa', padding: 10, borderRadius: 8, marginBottom: 8 }}>
                           <Text style={{ fontWeight: 'bold', fontSize: 13 }}>{pi.name}</Text>
@@ -2159,13 +2173,20 @@ return (
                         <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#28a745', marginTop: 4 }}>TOTAL: {formatMoney(promotionCalculation.final_total)}</Text>
 
                         {(promotionCalculation.items || []).map((itemRes, rIdx) => {
-                          if (itemRes.extra_qty > 0) {
-                            const unitLabel = itemRes.unit_type === 'kg' ? `${Math.round(itemRes.extra_qty * 1000)} g` : `${itemRes.extra_qty} unid`;
+                          const originalItem = promotionItems.find(p => p.product_id === itemRes.product_id);
+                          const includedQty = Number(originalItem?.included_qty || 0);
+                          const actualQty = Number(itemRes.actual_qty || 0);
+                          const extraQty = Math.max(0, actualQty - includedQty);
+
+                          if (extraQty > 0) {
+                            const unitLabel = formatQuantityVisual(extraQty, itemRes.unit_type);
+                            const incLabel = formatQuantityVisual(includedQty, itemRes.unit_type);
+                            const actLabel = formatQuantityVisual(actualQty, itemRes.unit_type);
                             return (
                               <View key={rIdx} style={{ marginTop: 6, borderTopWidth: 1, borderTopColor: '#bee5eb', paddingTop: 6 }}>
                                 <Text style={{ fontSize: 12, fontWeight: 'bold' }}>{itemRes.product_name || itemRes.name}:</Text>
-                                <Text style={{ fontSize: 11, color: '#555' }}>Incluido {itemRes.included_qty} — Real {itemRes.actual_qty} — Excedente {unitLabel}</Text>
-                                <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#dc3545' }}>+{formatMoney(itemRes.extra_price)}</Text>
+                                <Text style={{ fontSize: 11, color: '#555' }}>Incluido {incLabel} — Real {actLabel} — Excedente {unitLabel}</Text>
+                                <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#dc3545' }}>+{formatMoney(itemRes.extra_amount)}</Text>
                               </View>
                             );
                           }
@@ -2300,7 +2321,7 @@ return (
                     </View>
                     <Text style={{ fontSize: 12, color: '#555', marginBottom: 8 }}>Componentes reales calculados por backend:</Text>
                     {(activePromotionSale.calculation.items || []).map((ci, cIdx) => {
-                      const qFormatted = ci.unit_type === 'kg' ? `${ci.actual_qty} kg` : `${ci.actual_qty} unid`;
+                      const qFormatted = formatQuantityVisual(ci.actual_qty, ci.unit_type);
                       return (
                         <View key={cIdx} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 }}>
                           <Text style={{ fontSize: 12 }}>• {ci.product_name || ci.name}</Text>
