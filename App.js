@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar, Alert } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -196,6 +196,9 @@ export default function App() {
 
   // Administración de Promociones
   const [showPromotionAdmin, setShowPromotionAdmin] = useState(false);
+  const [promoAdminMode, setPromoAdminMode] = useState('list'); // 'list' | 'form'
+  const [adminPromotions, setAdminPromotions] = useState([]);
+  const [promoAdminLoading, setPromoAdminLoading] = useState(false);
   const [editingPromotionId, setEditingPromotionId] = useState(null);
   const [promoFormName, setPromoFormName] = useState('');
   const [promoFormDesc, setPromoFormDesc] = useState('');
@@ -1724,6 +1727,57 @@ export default function App() {
   };
 
   // Funciones para gestión de promociones en admin
+  const PROMO_BRANCH_IDS = [1, 2];
+
+  const parsePromoNumber = (v) => parseFloat(String(v ?? '').replace(',', '.'));
+
+  // Listado administrativo: une lo que devuelve el backend para ambas sucursales (incluye inactivas)
+  const loadAdminPromotions = async () => {
+    try {
+      setPromoAdminLoading(true);
+      const lists = await Promise.all(PROMO_BRANCH_IDS.map(b => fetchPromotions(b).catch(() => null)));
+      const failedBranches = PROMO_BRANCH_IDS.filter((b, idx) => lists[idx] === null);
+      if (failedBranches.length === PROMO_BRANCH_IDS.length) {
+        throw new Error('No se pudieron obtener las promociones');
+      }
+
+      const byId = new Map();
+      lists.forEach((list, idx) => {
+        const bId = PROMO_BRANCH_IDS[idx];
+        (list || []).forEach(p => {
+          const entry = byId.get(p.id) || { ...p, branches: {} };
+          entry.branches[bId] = { enabled: p.enabled === true, promo_price: p.promo_price };
+          if (p.active === true) entry.active = true;
+          byId.set(p.id, entry);
+        });
+      });
+
+      setAdminPromotions(prev => {
+        // Si el backend no lista una promoción dada de baja, se conserva visible como inactiva
+        prev.forEach(p => {
+          if (!byId.has(p.id) && p.active !== true) byId.set(p.id, p);
+        });
+        // Solo para mostrar: nunca se usa como fuente para guardar configuración de sucursales
+        return Array.from(byId.values())
+          .sort((a, b) => (Number(b.active === true) - Number(a.active === true)) || String(a.name || '').localeCompare(String(b.name || '')));
+      });
+
+      if (failedBranches.length > 0) {
+        alert(`⚠️ No se pudieron cargar las promociones de la sucursal ${failedBranches.join(', ')}. Su configuración puede verse incompleta.`);
+      }
+    } catch (e) {
+      alert(e.message || 'Error al obtener promociones');
+    } finally {
+      setPromoAdminLoading(false);
+    }
+  };
+
+  const openPromotionAdmin = () => {
+    setPromoAdminMode('list');
+    setShowPromotionAdmin(true);
+    loadAdminPromotions();
+  };
+
   const openCreatePromotionModal = () => {
     setEditingPromotionId(null);
     setPromoFormName('');
@@ -1734,39 +1788,98 @@ export default function App() {
     setPromoFormEnabledB1(true);
     setPromoFormPriceB2('');
     setPromoFormEnabledB2(true);
+    setPromoItemProductId('');
+    setPromoItemQty('');
+    setPromoAdminMode('form');
     setShowPromotionAdmin(true);
   };
+
+  // Resuelve de forma inequívoca la configuración de AMBAS sucursales desde fetchPromotionDetail.
+  // Si alguna no puede resolverse, se cancela: nunca se completa con enabled=false / promo_price=0.
+  const parseBranchEnabled = (v) => {
+    if (v === true || v === 1) return true;
+    if (v === false || v === 0) return false;
+    return null;
+  };
+
+  const fetchPromotionFullConfig = async (promo) => {
+    const results = await Promise.all(PROMO_BRANCH_IDS.map(b =>
+      fetchPromotionDetail(promo.id, b).then(d => ({ ok: true, d }), e => ({ ok: false, e }))
+    ));
+
+    const branches = {};
+    for (let idx = 0; idx < PROMO_BRANCH_IDS.length; idx++) {
+      const bId = PROMO_BRANCH_IDS[idx];
+      const r = results[idx];
+      const cancelMsg = `No se pudo obtener la configuración completa de la sucursal ${bId}. Operación cancelada para no sobrescribirla.`;
+      if (!r.ok || !r.d) throw new Error(`${cancelMsg}${r.e?.message ? `\n(${r.e.message})` : ''}`);
+      const d = r.d;
+      if (d.id != null && Number(d.id) !== Number(promo.id)) throw new Error(cancelMsg);
+      if (d.branch_id != null && Number(d.branch_id) !== bId) throw new Error(cancelMsg);
+      const enabled = parseBranchEnabled(d.enabled);
+      const rawPrice = d.promo_price;
+      const price = (rawPrice === null || rawPrice === undefined || rawPrice === '') ? NaN : Number(rawPrice);
+      if (enabled === null || !Number.isFinite(price) || price < 0) throw new Error(cancelMsg);
+      branches[bId] = { branch_id: bId, enabled, promo_price: price };
+    }
+
+    const base = results[0].d;
+    const items = (base.items || []).map(i => {
+      const prod = products.find(p => p.id === i.product_id);
+      return {
+        product_id: i.product_id,
+        name: i.product_name || i.name || prod?.name || `Producto #${i.product_id}`,
+        unit_type: i.unit_type || prod?.unit_type || 'unid',
+        included_qty: i.included_qty
+      };
+    });
+
+    return { base, branches, items };
+  };
+
+  const buildPromotionPayload = ({ name, description, active, items, branchCfg }) => ({
+    name,
+    description,
+    active,
+    created_by: email,
+    items: items.map((i, index) => ({
+      product_id: i.product_id,
+      included_qty: parsePromoNumber(i.included_qty),
+      unit_type: i.unit_type || 'unid',
+      sort_order: index
+    })),
+    branch_configs: PROMO_BRANCH_IDS.map(bId => {
+      const cfg = branchCfg[bId];
+      const p = cfg ? cfg.promo_price : NaN;
+      // Sin configuración resuelta no se envía nada (el llamador valida antes; esto es un resguardo)
+      if (!cfg || typeof cfg.enabled !== 'boolean' || !Number.isFinite(p) || p < 0) {
+        throw new Error(`Configuración de la sucursal ${bId} incompleta. Operación cancelada.`);
+      }
+      // Una sucursal deshabilitada conserva su precio: deshabilitada NO significa precio 0
+      return { branch_id: bId, promo_price: p, enabled: cfg.enabled };
+    })
+  });
 
   const openEditPromotionModal = async (promo) => {
     try {
       setLoading(true);
+      const { base, branches, items } = await fetchPromotionFullConfig(promo);
+
       setEditingPromotionId(promo.id);
+      setPromoFormName(base.name || '');
+      setPromoFormDesc(base.description || '');
+      setPromoFormEnabled(base.active ?? promo.active ?? true);
+      setPromoFormItems(items.map(i => ({ ...i, included_qty: String(i.included_qty ?? '') })));
 
-      const [detB1, detB2] = await Promise.all([
-        fetchPromotionDetail(promo.id, 1).catch(() => null),
-        fetchPromotionDetail(promo.id, 2).catch(() => null)
-      ]);
+      setPromoFormPriceB1(String(branches[1].promo_price));
+      setPromoFormEnabledB1(branches[1].enabled);
 
-      const baseDetail = detB1 || detB2 || promo;
+      setPromoFormPriceB2(String(branches[2].promo_price));
+      setPromoFormEnabledB2(branches[2].enabled);
 
-      setPromoFormName(baseDetail.name || '');
-      setPromoFormDesc(baseDetail.description || '');
-      setPromoFormEnabled(baseDetail.active ?? true);
-
-      const itemsMapped = (baseDetail.items || []).map(i => ({
-        product_id: i.product_id,
-        name: i.product_name || i.name,
-        unit_type: i.unit_type || 'unid',
-        included_qty: i.included_qty
-      }));
-      setPromoFormItems(itemsMapped);
-
-      setPromoFormPriceB1(detB1 && detB1.promo_price != null ? String(detB1.promo_price) : '');
-      setPromoFormEnabledB1(detB1 ? !!detB1.enabled : true);
-
-      setPromoFormPriceB2(detB2 && detB2.promo_price != null ? String(detB2.promo_price) : '');
-      setPromoFormEnabledB2(detB2 ? !!detB2.enabled : true);
-
+      setPromoItemProductId('');
+      setPromoItemQty('');
+      setPromoAdminMode('form');
       setShowPromotionAdmin(true);
     } catch (e) {
       alert(e.message || 'Error al abrir editor de promoción');
@@ -1790,7 +1903,7 @@ export default function App() {
       product_id: prod.id,
       name: prod.name,
       unit_type: prod.unit_type || 'unid',
-      included_qty: q
+      included_qty: String(q)
     }]);
     setPromoItemProductId('');
     setPromoItemQty('');
@@ -1800,16 +1913,25 @@ export default function App() {
     setPromoFormItems(promoFormItems.filter(i => i.product_id !== productId));
   };
 
+  const updatePromoItemQtyInDraft = (productId, value) => {
+    setPromoFormItems(promoFormItems.map(i => i.product_id === productId ? { ...i, included_qty: value } : i));
+  };
+
   const handleSavePromotion = async () => {
     if (!promoFormName.trim()) return alert('El nombre es obligatorio');
     if (promoFormItems.length === 0) return alert('Agregá al menos un componente');
+
+    for (const i of promoFormItems) {
+      const q = parsePromoNumber(i.included_qty);
+      if (!Number.isFinite(q) || q <= 0) return alert(`Cantidad incluida inválida para ${i.name}`);
+    }
 
     if (!promoFormEnabledB1 && !promoFormEnabledB2) {
       return alert('La promoción debe estar habilitada al menos en una sucursal.');
     }
 
-    const p1 = parseFloat(String(promoFormPriceB1 || '').replace(',', '.'));
-    const p2 = parseFloat(String(promoFormPriceB2 || '').replace(',', '.'));
+    const p1 = parsePromoNumber(promoFormPriceB1);
+    const p2 = parsePromoNumber(promoFormPriceB2);
 
     if (promoFormEnabledB1 && (!Number.isFinite(p1) || p1 <= 0)) {
       return alert('Precio de promoción inválido para Sucursal 1 habilitada');
@@ -1817,31 +1939,28 @@ export default function App() {
     if (promoFormEnabledB2 && (!Number.isFinite(p2) || p2 <= 0)) {
       return alert('Precio de promoción inválido para Sucursal 2 habilitada');
     }
+    if (editingPromotionId) {
+      // Al editar no se completa ningún precio por defecto: la sucursal deshabilitada conserva el suyo
+      if (!Number.isFinite(p1) || p1 < 0) return alert('Precio inválido para Sucursal 1 (deshabilitada). Ingresá el precio a conservar.');
+      if (!Number.isFinite(p2) || p2 < 0) return alert('Precio inválido para Sucursal 2 (deshabilitada). Ingresá el precio a conservar.');
+    }
 
-    const payload = {
-      name: promoFormName.trim(),
-      description: promoFormDesc.trim() || null,
-      active: promoFormEnabled,
-      created_by: email,
-      items: promoFormItems.map((i, index) => ({
-        product_id: i.product_id,
-        included_qty: Number(i.included_qty),
-        unit_type: i.unit_type || 'unid',
-        sort_order: index
-      })),
-      branch_configs: [
-        {
-          branch_id: 1,
-          promo_price: promoFormEnabledB1 ? p1 : 0,
-          enabled: promoFormEnabledB1
-        },
-        {
-          branch_id: 2,
-          promo_price: promoFormEnabledB2 ? p2 : 0,
-          enabled: promoFormEnabledB2
+    let payload;
+    try {
+      payload = buildPromotionPayload({
+        name: promoFormName.trim(),
+        description: promoFormDesc.trim() || null,
+        active: promoFormEnabled,
+        items: promoFormItems,
+        branchCfg: {
+          // Alta nueva: una sucursal deshabilitada sin precio se crea con 0 (no hay configuración previa que pisar)
+          1: { promo_price: !editingPromotionId && !promoFormEnabledB1 && !Number.isFinite(p1) ? 0 : p1, enabled: promoFormEnabledB1 },
+          2: { promo_price: !editingPromotionId && !promoFormEnabledB2 && !Number.isFinite(p2) ? 0 : p2, enabled: promoFormEnabledB2 }
         }
-      ]
-    };
+      });
+    } catch (e) {
+      return alert(e.message);
+    }
 
     try {
       setLoading(true);
@@ -1852,7 +1971,9 @@ export default function App() {
         await createPromotion(payload);
         alert('✅ Promoción creada');
       }
-      setShowPromotionAdmin(false);
+      setEditingPromotionId(null);
+      setPromoAdminMode('list');
+      await loadAdminPromotions();
       await loadPromotions();
     } catch (e) {
       alert(e.message || 'Error al guardar promoción');
@@ -1861,25 +1982,62 @@ export default function App() {
     }
   };
 
-  const handleDeleteOrDisablePromotion = async (promo) => {
-    alert('¿Estás seguro de desactivar/eliminar esta promoción?', '', [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Desactivar',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            setLoading(true);
-            await deletePromotion(promo.id);
-            alert('Promoción desactivada');
-            await loadPromotions();
-          } catch (e) {
-            alert(e.message || 'Error al desactivar');
-          } finally {
-            setLoading(false);
-          }
-        }
+  const handleReactivatePromotion = async (promo) => {
+    try {
+      setLoading(true);
+      const { base, branches, items } = await fetchPromotionFullConfig(promo);
+
+      if (items.length === 0) {
+        return alert('La promoción no tiene componentes. Editala para completarla antes de reactivarla.');
       }
+      const hasValidBranch = PROMO_BRANCH_IDS.some(b => branches[b].enabled && branches[b].promo_price > 0);
+      if (!hasValidBranch) {
+        return alert('Para reactivarla necesita al menos una sucursal habilitada con precio promocional. Usá "Editar" para configurarla.');
+      }
+
+      const payload = buildPromotionPayload({
+        name: base.name || promo.name,
+        description: base.description ?? promo.description ?? null,
+        active: true,
+        items,
+        branchCfg: branches
+      });
+
+      await updatePromotion(promo.id, payload);
+      alert('✅ Promoción reactivada');
+      await loadAdminPromotions();
+      await loadPromotions();
+    } catch (e) {
+      alert(e.message || 'Error al reactivar promoción');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteOrDisablePromotion = async (promo) => {
+    const doDisable = async () => {
+      try {
+        setLoading(true);
+        await deletePromotion(promo.id);
+        setAdminPromotions(prev => prev.map(p => p.id === promo.id ? { ...p, active: false } : p));
+        alert('Promoción dada de baja');
+        await loadAdminPromotions();
+        await loadPromotions();
+      } catch (e) {
+        alert(e.message || 'Error al dar de baja');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const question = `¿Dar de baja la promoción "${promo.name}"? Seguirá visible en Administración y podrá reactivarse.`;
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm(question)) await doDisable();
+      return;
+    }
+    Alert.alert('Dar de baja promoción', question, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Dar de baja', style: 'destructive', onPress: doDisable }
     ]);
   };
 
@@ -2583,7 +2741,7 @@ return (
             </View>
 
             {isAdminLevel && (
-              <TouchableOpacity style={{ backgroundColor: '#6f42c1', padding: 10, borderRadius: 8, alignItems: 'center', marginBottom: 15 }} onPress={openCreatePromotionModal}>
+              <TouchableOpacity style={{ backgroundColor: '#6f42c1', padding: 10, borderRadius: 8, alignItems: 'center', marginBottom: 15 }} onPress={openPromotionAdmin}>
                 <Text style={{ color: '#fff', fontWeight: 'bold' }}>⚙️ Administrar promociones</Text>
               </TouchableOpacity>
             )}
@@ -2729,29 +2887,45 @@ return (
 
                     {promotionCalculation && (
                       <View style={{ marginTop: 15, padding: 12, backgroundColor: '#e8f4f8', borderRadius: 8, borderWidth: 1, borderColor: '#b8daff' }}>
-                        <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#333' }}>Precio base: {formatMoney(promotionCalculation.promo_price)}</Text>
-                        <Text style={{ fontSize: 14, fontWeight: 'bold', color: promotionCalculation.total_extra > 0 ? '#dc3545' : '#333' }}>Excedentes: {formatMoney(promotionCalculation.total_extra)}</Text>
-                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#28a745', marginTop: 4 }}>TOTAL: {formatMoney(promotionCalculation.final_total)}</Text>
+                        {(() => {
+                          // regular_actual_total es SOLO informativo; el importe a cobrar es final_total
+                          const hasRegular = promotionCalculation.regular_actual_total != null;
+                          const regularTotal = Number(promotionCalculation.regular_actual_total || 0);
+                          const finalTotal = Number(promotionCalculation.final_total || 0);
+                          const savings = Math.max(0, regularTotal - finalTotal);
+                          return (
+                            <>
+                              <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#333' }}>Precio base promo: {formatMoney(promotionCalculation.promo_price)}</Text>
+                              {hasRegular && <Text style={{ fontSize: 13, color: '#555' }}>Valor normal de lo entregado: {formatMoney(regularTotal)}</Text>}
+                              <Text style={{ fontSize: 14, fontWeight: 'bold', color: promotionCalculation.total_extra > 0 ? '#dc3545' : '#333' }}>Excedentes: {formatMoney(promotionCalculation.total_extra)}</Text>
+                              {hasRegular && <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#17a2b8' }}>Ahorro del cliente: {formatMoney(savings)}</Text>}
+                              <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#28a745', marginTop: 4 }}>TOTAL A COBRAR: {formatMoney(finalTotal)}</Text>
+                            </>
+                          );
+                        })()}
 
                         {(promotionCalculation.items || []).map((itemRes, rIdx) => {
                           const originalItem = promotionItems.find(p => p.product_id === itemRes.product_id);
                           const includedQty = Number(originalItem?.included_qty || 0);
                           const actualQty = Number(itemRes.actual_qty || 0);
                           const extraQty = Math.max(0, actualQty - includedQty);
+                          const incLabel = formatQuantityVisual(includedQty, itemRes.unit_type);
+                          const actLabel = formatQuantityVisual(actualQty, itemRes.unit_type);
 
-                          if (extraQty > 0) {
-                            const unitLabel = formatQuantityVisual(extraQty, itemRes.unit_type);
-                            const incLabel = formatQuantityVisual(includedQty, itemRes.unit_type);
-                            const actLabel = formatQuantityVisual(actualQty, itemRes.unit_type);
-                            return (
-                              <View key={rIdx} style={{ marginTop: 6, borderTopWidth: 1, borderTopColor: '#bee5eb', paddingTop: 6 }}>
-                                <Text style={{ fontSize: 12, fontWeight: 'bold' }}>{itemRes.product_name || itemRes.name}:</Text>
-                                <Text style={{ fontSize: 11, color: '#555' }}>Incluido {incLabel} — Real {actLabel} — Excedente {unitLabel}</Text>
+                          return (
+                            <View key={rIdx} style={{ marginTop: 6, borderTopWidth: 1, borderTopColor: '#bee5eb', paddingTop: 6 }}>
+                              <Text style={{ fontSize: 12, fontWeight: 'bold' }}>{itemRes.product_name || itemRes.name}:</Text>
+                              <Text style={{ fontSize: 11, color: '#555' }}>
+                                Incluido {incLabel} — Real {actLabel}{extraQty > 0 ? ` — Excedente ${formatQuantityVisual(extraQty, itemRes.unit_type)}` : ''}
+                              </Text>
+                              {itemRes.regular_actual_value != null && (
+                                <Text style={{ fontSize: 11, color: '#555' }}>Valor normal entregado: {formatMoney(itemRes.regular_actual_value)}</Text>
+                              )}
+                              {extraQty > 0 && (
                                 <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#dc3545' }}>+{formatMoney(itemRes.extra_amount)}</Text>
-                              </View>
-                            );
-                          }
-                          return null;
+                              )}
+                            </View>
+                          );
                         })}
 
                         <TouchableOpacity style={[styles.buttonSuccess, { marginTop: 12 }]} onPress={handlePassPromotionToCash}>
@@ -4261,13 +4435,73 @@ return (
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-              <Text style={{ fontSize: 18, fontWeight: 'bold' }}>{editingPromotionId ? 'Editar Promoción' : 'Nueva Promoción'}</Text>
-              <TouchableOpacity onPress={() => setShowPromotionAdmin(false)}>
+              <Text style={{ fontSize: 18, fontWeight: 'bold' }}>{promoAdminMode === 'list' ? '⚙️ Administrar promociones' : (editingPromotionId ? 'Editar Promoción' : 'Nueva Promoción')}</Text>
+              <TouchableOpacity onPress={() => {
+                if (promoAdminMode === 'form') { setEditingPromotionId(null); setPromoAdminMode('list'); }
+                else setShowPromotionAdmin(false);
+              }}>
                 <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#dc3545' }}>✕</Text>
               </TouchableOpacity>
             </View>
 
+            {promoAdminMode === 'list' ? (
+            <ScrollView style={{ maxHeight: 450 }}>
+              <TouchableOpacity style={[styles.buttonSuccess, { marginTop: 0, marginBottom: 10 }]} onPress={openCreatePromotionModal}>
+                <Text style={styles.buttonText}>+ Nueva promoción</Text>
+              </TouchableOpacity>
+
+              {promoAdminLoading && <ActivityIndicator size="small" color="#6f42c1" style={{ marginVertical: 10 }} />}
+              {!promoAdminLoading && adminPromotions.length === 0 && (
+                <Text style={styles.emptyText}>No hay promociones cargadas.</Text>
+              )}
+
+              {adminPromotions.map(promo => {
+                const isActive = promo.active === true;
+                return (
+                  <View key={promo.id} style={[styles.card, { borderWidth: 1, borderColor: isActive ? '#6f42c1' : '#adb5bd', opacity: isActive ? 1 : 0.85 }]}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Text style={{ fontSize: 15, fontWeight: 'bold', color: isActive ? '#6f42c1' : '#6c757d', flex: 1 }}>🎁 {promo.name}</Text>
+                      <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#fff', backgroundColor: isActive ? '#28a745' : '#6c757d', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>{isActive ? 'ACTIVA' : 'INACTIVA'}</Text>
+                    </View>
+                    {promo.description ? <Text style={{ fontSize: 11, color: '#555', marginTop: 2 }}>{promo.description}</Text> : null}
+
+                    {PROMO_BRANCH_IDS.map(bId => {
+                      const cfg = promo.branches?.[bId];
+                      const bName = bId === 1 ? 'Fiambrería Local' : 'Feria Damyale';
+                      return (
+                        <Text key={bId} style={{ fontSize: 11, color: '#333', marginTop: 2 }}>
+                          Suc. {bId} ({bName}): {cfg ? `${formatMoney(cfg.promo_price ?? 0)} · ${cfg.enabled ? 'Habilitada' : 'Deshabilitada'}` : 'Sin configurar'}
+                        </Text>
+                      );
+                    })}
+
+                    {(promo.items || []).map((ci, idx) => (
+                      <Text key={idx} style={{ fontSize: 11, color: '#555' }}>• {formatQuantityVisual(ci.included_qty, ci.unit_type)} {ci.product_name || ci.name}</Text>
+                    ))}
+
+                    <View style={{ flexDirection: 'row', marginTop: 8 }}>
+                      <TouchableOpacity style={[styles.typeBtn, { marginRight: 6, backgroundColor: '#007bff' }]} onPress={() => openEditPromotionModal(promo)} disabled={loading}>
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>✏️ Editar</Text>
+                      </TouchableOpacity>
+                      {isActive ? (
+                        <TouchableOpacity style={[styles.typeBtn, { backgroundColor: '#dc3545' }]} onPress={() => handleDeleteOrDisablePromotion(promo)} disabled={loading}>
+                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>⛔ Dar de baja</Text>
+                        </TouchableOpacity>
+                      ) : (
+                        <TouchableOpacity style={[styles.typeBtn, { backgroundColor: '#28a745' }]} onPress={() => handleReactivatePromotion(promo)} disabled={loading}>
+                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>♻️ Reactivar</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+                );
+              })}
+            </ScrollView>
+            ) : (
             <ScrollView style={{ maxHeight: 400 }}>
+              <TouchableOpacity onPress={() => { setEditingPromotionId(null); setPromoAdminMode('list'); }} style={{ marginBottom: 8 }}>
+                <Text style={{ color: '#007bff', fontWeight: 'bold' }}>← Volver al listado</Text>
+              </TouchableOpacity>
               <TextInput style={styles.input} placeholder="Nombre de la promoción" value={promoFormName} onChangeText={setPromoFormName} />
               <TextInput style={styles.input} placeholder="Descripción (opcional)" value={promoFormDesc} onChangeText={setPromoFormDesc} />
 
@@ -4276,7 +4510,16 @@ return (
                 <View key={idx} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f8f9fa', padding: 8, borderRadius: 6, marginBottom: 6 }}>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontWeight: 'bold', fontSize: 12 }}>{item.name}</Text>
-                    <Text style={{ fontSize: 11, color: '#555' }}>Incluye: {item.included_qty} {item.unit_type}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Text style={{ fontSize: 11, color: '#555' }}>Incluye: </Text>
+                      <TextInput
+                        style={[styles.input, { width: 80, marginBottom: 0, paddingVertical: 2, fontSize: 12 }]}
+                        keyboardType="numeric"
+                        value={String(item.included_qty ?? '')}
+                        onChangeText={(v) => updatePromoItemQtyInDraft(item.product_id, v)}
+                      />
+                      <Text style={{ fontSize: 11, color: '#555', marginLeft: 4 }}>{item.unit_type === 'kg' ? 'kg' : 'unid'}</Text>
+                    </View>
                   </View>
                   <TouchableOpacity onPress={() => removePromoItemFromDraft(item.product_id)}>
                     <Text style={{ color: '#dc3545', fontWeight: 'bold' }}>Quitar</Text>
@@ -4329,10 +4572,21 @@ return (
                 </TouchableOpacity>
               </View>
 
+              <Text style={{ fontWeight: 'bold', marginTop: 8, marginBottom: 4 }}>Estado general:</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+                <TouchableOpacity
+                  style={[styles.typeBtn, { backgroundColor: promoFormEnabled ? '#28a745' : '#6c757d' }]}
+                  onPress={() => setPromoFormEnabled(!promoFormEnabled)}
+                >
+                  <Text style={{ color: '#fff', fontWeight: 'bold' }}>{promoFormEnabled ? 'Promoción ACTIVA' : 'Promoción INACTIVA'}</Text>
+                </TouchableOpacity>
+              </View>
+
               <TouchableOpacity style={[styles.buttonSuccess, { marginTop: 15 }]} onPress={handleSavePromotion} disabled={loading}>
                 <Text style={styles.buttonText}>💾 Guardar Promoción</Text>
               </TouchableOpacity>
             </ScrollView>
+            )}
           </View>
         </View>
       )}
