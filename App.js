@@ -5,6 +5,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import * as XLSX from 'xlsx';
+import FairDayPlanner from './FairDayPlanner';
 import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProfitability, fetchMasterProductByBarcode, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, updateIngress, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled, actOnAlert, fetchAlertHistory, updateReplenishmentPolicy, fetchBranchProductsAdmin, configureBranchProduct, removeBranchProduct, fetchLatestProductAudit, fetchSalesHistory, fetchSaleDetail, fetchPromotions, fetchPromotionDetail, createPromotion, updatePromotion, deletePromotion, calculatePromotion, fetchIngressHistory } from './api';
 
 export default function App() {
@@ -109,6 +110,8 @@ export default function App() {
   const branchName = branchId === 2 ? 'Feria Damyale' : 'Fiambrería Local';
   const isAdminLevel = userRole === 'masteradmin' || userRole === 'superadmin';
   const isMasterAdmin = userRole === 'masteradmin';
+  // 🎪 ¿Conviene abrir?: solo en Feria Damyale (branch_id=2) y para administración o dueño.
+  const canFairPlanner = branchId === 2 && (isAdminLevel || userRole === 'dueno');
 
   // Permisos dinámicos por módulo y edición
   const [isAccountActive, setIsAccountActive] = useState(false);
@@ -364,6 +367,10 @@ export default function App() {
     const interval = setInterval(() => { loadInitialData(); }, 5000);
     return () => clearInterval(interval);
   }, [isLoggedIn, branchId]);
+
+  useEffect(() => {
+    if (currentTab === 'feria' && !canFairPlanner) setCurrentTab('preventa');
+  }, [currentTab, canFairPlanner]);
 
   const handleTabChange = async (tabName) => {
     setCurrentTab(tabName);
@@ -3434,6 +3441,18 @@ return (
           </ScrollView>
         )}
 
+        {/* 🎪 OBJETIVO DE JORNADA — FERIA */}
+        {currentTab === 'feria' && canFairPlanner && (
+          <FairDayPlanner
+            branchId={branchId}
+            userEmail={email}
+            canEditConfig={isAdminLevel}
+            formatMoney={formatMoney}
+            formatQuantityVisual={formatQuantityVisual}
+            applyDateMask={applyDateMask}
+          />
+        )}
+
         {/* KPIS V2 - RENTABILIDAD REAL */}
         {currentTab === 'kpis' && (canKPIs || isAdminLevel) && (
           <ScrollView contentContainerStyle={styles.scrollPadding}>
@@ -4634,6 +4653,13 @@ return (
       {/* NAVBAR NAVEGABLE COMPLETO */}
       <View style={styles.navbarWrapper}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.navbarContent}>
+          {canFairPlanner && (
+            <TouchableOpacity style={[styles.navBtn, currentTab === 'feria' && styles.navActive]} onPress={() => handleTabChange('feria')}>
+              <Text style={styles.navIcon}>🎪</Text>
+              <Text style={styles.navText}>¿Conviene abrir?</Text>
+            </TouchableOpacity>
+          )}
+
           {(canKPIs || isAdminLevel) && (
             <TouchableOpacity style={[styles.navBtn, currentTab === 'kpis' && styles.navActive]} onPress={() => handleTabChange('kpis')}>
               <Text style={styles.navIcon}>📈</Text>
