@@ -1755,10 +1755,10 @@ export default function App() {
       setAdminPromotions(prev => {
         // Si el backend no lista una promoción dada de baja, se conserva visible como inactiva
         prev.forEach(p => {
-          if (!byId.has(p.id) && p.active !== true) byId.set(p.id, { ...p, failedBranches });
+          if (!byId.has(p.id) && p.active !== true) byId.set(p.id, p);
         });
+        // Solo para mostrar: nunca se usa como fuente para guardar configuración de sucursales
         return Array.from(byId.values())
-          .map(p => ({ ...p, failedBranches }))
           .sort((a, b) => (Number(b.active === true) - Number(a.active === true)) || String(a.name || '').localeCompare(String(b.name || '')));
       });
 
@@ -1794,27 +1794,36 @@ export default function App() {
     setShowPromotionAdmin(true);
   };
 
-  // Obtiene la configuración completa de ambas sucursales para no pisar ninguna al editar/reactivar
+  // Resuelve de forma inequívoca la configuración de AMBAS sucursales desde fetchPromotionDetail.
+  // Si alguna no puede resolverse, se cancela: nunca se completa con enabled=false / promo_price=0.
+  const parseBranchEnabled = (v) => {
+    if (v === true || v === 1) return true;
+    if (v === false || v === 0) return false;
+    return null;
+  };
+
   const fetchPromotionFullConfig = async (promo) => {
-    const details = await Promise.all(PROMO_BRANCH_IDS.map(b => fetchPromotionDetail(promo.id, b).catch(() => null)));
-    // Si el detalle no está disponible (p.ej. promo inactiva), se usa lo obtenido en el listado
-    const base = details.find(Boolean) || ((promo.items || []).length > 0 ? promo : null);
-    if (!base) throw new Error('No se pudo obtener el detalle de la promoción. No se realizaron cambios.');
+    const results = await Promise.all(PROMO_BRANCH_IDS.map(b =>
+      fetchPromotionDetail(promo.id, b).then(d => ({ ok: true, d }), e => ({ ok: false, e }))
+    ));
 
     const branches = {};
     for (let idx = 0; idx < PROMO_BRANCH_IDS.length; idx++) {
       const bId = PROMO_BRANCH_IDS[idx];
-      const src = details[idx] || promo.branches?.[bId] || null;
-      if (!src && (promo.failedBranches || []).includes(bId)) {
-        throw new Error(`No se pudo obtener la configuración de la sucursal ${bId}. No se realizaron cambios para no sobrescribirla.`);
-      }
-      const price = src && src.promo_price != null ? Number(src.promo_price) : null;
-      branches[bId] = {
-        promo_price: Number.isFinite(price) ? price : null,
-        enabled: !!src && src.enabled === true
-      };
+      const r = results[idx];
+      const cancelMsg = `No se pudo obtener la configuración completa de la sucursal ${bId}. Operación cancelada para no sobrescribirla.`;
+      if (!r.ok || !r.d) throw new Error(`${cancelMsg}${r.e?.message ? `\n(${r.e.message})` : ''}`);
+      const d = r.d;
+      if (d.id != null && Number(d.id) !== Number(promo.id)) throw new Error(cancelMsg);
+      if (d.branch_id != null && Number(d.branch_id) !== bId) throw new Error(cancelMsg);
+      const enabled = parseBranchEnabled(d.enabled);
+      const rawPrice = d.promo_price;
+      const price = (rawPrice === null || rawPrice === undefined || rawPrice === '') ? NaN : Number(rawPrice);
+      if (enabled === null || !Number.isFinite(price) || price < 0) throw new Error(cancelMsg);
+      branches[bId] = { branch_id: bId, enabled, promo_price: price };
     }
 
+    const base = results[0].d;
     const items = (base.items || []).map(i => {
       const prod = products.find(p => p.id === i.product_id);
       return {
@@ -1840,13 +1849,14 @@ export default function App() {
       sort_order: index
     })),
     branch_configs: PROMO_BRANCH_IDS.map(bId => {
-      const p = branchCfg[bId].promo_price;
-      return {
-        branch_id: bId,
-        // Una sucursal deshabilitada conserva su precio previo (si lo tenía)
-        promo_price: Number.isFinite(p) && p > 0 ? p : 0,
-        enabled: branchCfg[bId].enabled
-      };
+      const cfg = branchCfg[bId];
+      const p = cfg ? cfg.promo_price : NaN;
+      // Sin configuración resuelta no se envía nada (el llamador valida antes; esto es un resguardo)
+      if (!cfg || typeof cfg.enabled !== 'boolean' || !Number.isFinite(p) || p < 0) {
+        throw new Error(`Configuración de la sucursal ${bId} incompleta. Operación cancelada.`);
+      }
+      // Una sucursal deshabilitada conserva su precio: deshabilitada NO significa precio 0
+      return { branch_id: bId, promo_price: p, enabled: cfg.enabled };
     })
   });
 
@@ -1861,10 +1871,10 @@ export default function App() {
       setPromoFormEnabled(base.active ?? promo.active ?? true);
       setPromoFormItems(items.map(i => ({ ...i, included_qty: String(i.included_qty ?? '') })));
 
-      setPromoFormPriceB1(branches[1].promo_price != null ? String(branches[1].promo_price) : '');
+      setPromoFormPriceB1(String(branches[1].promo_price));
       setPromoFormEnabledB1(branches[1].enabled);
 
-      setPromoFormPriceB2(branches[2].promo_price != null ? String(branches[2].promo_price) : '');
+      setPromoFormPriceB2(String(branches[2].promo_price));
       setPromoFormEnabledB2(branches[2].enabled);
 
       setPromoItemProductId('');
@@ -1929,17 +1939,28 @@ export default function App() {
     if (promoFormEnabledB2 && (!Number.isFinite(p2) || p2 <= 0)) {
       return alert('Precio de promoción inválido para Sucursal 2 habilitada');
     }
+    if (editingPromotionId) {
+      // Al editar no se completa ningún precio por defecto: la sucursal deshabilitada conserva el suyo
+      if (!Number.isFinite(p1) || p1 < 0) return alert('Precio inválido para Sucursal 1 (deshabilitada). Ingresá el precio a conservar.');
+      if (!Number.isFinite(p2) || p2 < 0) return alert('Precio inválido para Sucursal 2 (deshabilitada). Ingresá el precio a conservar.');
+    }
 
-    const payload = buildPromotionPayload({
-      name: promoFormName.trim(),
-      description: promoFormDesc.trim() || null,
-      active: promoFormEnabled,
-      items: promoFormItems,
-      branchCfg: {
-        1: { promo_price: p1, enabled: promoFormEnabledB1 },
-        2: { promo_price: p2, enabled: promoFormEnabledB2 }
-      }
-    });
+    let payload;
+    try {
+      payload = buildPromotionPayload({
+        name: promoFormName.trim(),
+        description: promoFormDesc.trim() || null,
+        active: promoFormEnabled,
+        items: promoFormItems,
+        branchCfg: {
+          // Alta nueva: una sucursal deshabilitada sin precio se crea con 0 (no hay configuración previa que pisar)
+          1: { promo_price: !editingPromotionId && !promoFormEnabledB1 && !Number.isFinite(p1) ? 0 : p1, enabled: promoFormEnabledB1 },
+          2: { promo_price: !editingPromotionId && !promoFormEnabledB2 && !Number.isFinite(p2) ? 0 : p2, enabled: promoFormEnabledB2 }
+        }
+      });
+    } catch (e) {
+      return alert(e.message);
+    }
 
     try {
       setLoading(true);
