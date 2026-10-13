@@ -296,6 +296,15 @@ export default function App() {
   const [ingressHistoryDateTo, setIngressHistoryDateTo] = useState('');
   const [ingressHistoryLoading, setIngressHistoryLoading] = useState(false);
 
+  // Estados para Edición Ampliada en Corrección de Ingreso
+  const [editProdName, setEditProdName] = useState("");
+  const [editProdBrand, setEditProdBrand] = useState("");
+  const [editProdCategory, setEditProdCategory] = useState("");
+  const [editProdBarcode, setEditProdBarcode] = useState("");
+  const [editProdUnitType, setEditProdUnitType] = useState("unid");
+  const [editProdRequiresExpiration, setEditProdRequiresExpiration] = useState(false);
+  const [editBranchPrice, setEditBranchPrice] = useState("");
+
 
   const loadPromotions = async () => {
     try {
@@ -363,6 +372,7 @@ export default function App() {
     else if (tabName === 'ingresos') {
       setIngressHistory([]);
       setShowIngressHistory(false);
+      setEditingIngress(null);
     }
     await loadInitialData();
   };
@@ -530,6 +540,7 @@ export default function App() {
     setViewingTicket(null);
     setIngressHistory([]);
     setShowIngressHistory(false);
+    setEditingIngress(null);
     setSelectedPosterProduct(null);
     setSelectedPosterPromo(null);
     setPosterKgFraction('1/4');
@@ -637,13 +648,72 @@ export default function App() {
     setIngressSearch(''); setIngressMatches([]);
   };
 
+  // Función de máscara reutilizable para campos de fecha (DD/MM/AAAA)
+  const applyDateMask = (value) => {
+    const digits = value.replace(/\D/g, '').slice(0, 8);
+    let formatted = digits;
+    if (digits.length > 4) {
+      formatted = digits.slice(0, 2) + '/' + digits.slice(2, 4) + '/' + digits.slice(4);
+    } else if (digits.length > 2) {
+      formatted = digits.slice(0, 2) + '/' + digits.slice(2);
+    }
+    return formatted;
+  };
+
+  // Validación real DD/MM/AAAA
+  const validateAndConvertDate = (dateStr) => {
+    if (!dateStr || !dateStr.trim()) return { isValid: true, iso: null };
+    const clean = dateStr.trim();
+    const regex = /^(\d{2})\/(\d{2})\/(\d{4})$/;
+    if (!regex.test(clean)) return { isValid: false, error: "Ingresá una fecha válida con formato DD/MM/AAAA." };
+
+    const [, ddStr, mmStr, yyyyStr] = clean.match(regex);
+    const dd = Number(ddStr);
+    const mm = Number(mmStr);
+    const yyyy = Number(yyyyStr);
+
+    if (mm < 1 || mm > 12) return { isValid: false, error: "Ingresá una fecha válida con formato DD/MM/AAAA." };
+
+    const daysInMonth = new Date(yyyy, mm, 0).getDate();
+    if (dd < 1 || dd > daysInMonth) return { isValid: false, error: "Ingresá una fecha válida con formato DD/MM/AAAA." };
+
+    const iso = `${yyyyStr}-${mmStr}-${ddStr}`;
+    return { isValid: true, iso };
+  };
+
   const loadIngressHistory = async () => {
+    let dateFromIso = null;
+    let dateToIso = null;
+
+    if (ingressHistoryDateFrom.trim()) {
+      const resFrom = validateAndConvertDate(ingressHistoryDateFrom);
+      if (!resFrom.isValid) {
+        alert(resFrom.error);
+        return;
+      }
+      dateFromIso = resFrom.iso;
+    }
+
+    if (ingressHistoryDateTo.trim()) {
+      const resTo = validateAndConvertDate(ingressHistoryDateTo);
+      if (!resTo.isValid) {
+        alert(resTo.error);
+        return;
+      }
+      dateToIso = resTo.iso;
+    }
+
+    if (dateFromIso && dateToIso && dateFromIso > dateToIso) {
+      alert("La fecha Desde no puede ser posterior a Hasta.");
+      return;
+    }
+
     try {
       setIngressHistoryLoading(true);
       const data = await fetchIngressHistory(branchId || 1, {
         search: ingressHistorySearch.trim() || null,
-        dateFrom: ingressHistoryDateFrom || null,
-        dateTo: ingressHistoryDateTo || null,
+        dateFrom: dateFromIso,
+        dateTo: dateToIso,
         limit: 100
       });
       setIngressHistory(data || []);
@@ -655,14 +725,48 @@ export default function App() {
     }
   };
 
-  const beginIngressCorrection = (item) => {
+  const beginIngressCorrection = async (item) => {
     setEditingIngress(item);
     setEditIngressQty(String(item.quantity ?? ""));
     setEditIngressCost(String(item.unit_cost ?? item.cost_price ?? ""));
     setEditIngressSupplier(item.supplier || "");
     setEditIngressLot(item.lot_code ?? (item.lot_number || ""));
-    setEditIngressExpiration(item.expiration_date || "");
+    
+    // Convertir de AAAA-MM-DD a DD/MM/AAAA si existe
+    let expFormatted = "";
+    if (item.expiration_date) {
+      const parts = item.expiration_date.split('T')[0].split('-');
+      if (parts.length === 3) {
+        expFormatted = `${parts[2]}/${parts[1]}/${parts[0]}`;
+      } else {
+        expFormatted = item.expiration_date;
+      }
+    }
+    setEditIngressExpiration(expFormatted);
     setEditIngressReason("");
+
+    // Cargar datos actuales del producto para el Bloque A
+    const prodId = item.product_id;
+    if (prodId) {
+      const targetProd = products.find(p => p.id === prodId);
+      if (targetProd) {
+        setEditProdName(targetProd.name || "");
+        setEditProdBrand(targetProd.brand || "");
+        setEditProdCategory(targetProd.category || "Varios");
+        setEditProdBarcode(targetProd.barcode || "");
+        setEditProdUnitType(targetProd.unit_type || "unid");
+        setEditProdRequiresExpiration(!!targetProd.requires_expiration);
+        setEditBranchPrice(String(targetProd.branch_price ?? targetProd.price_per_unit ?? ""));
+      } else {
+        setEditProdName(item.product_name || item.name || "");
+        setEditProdBrand("");
+        setEditProdCategory(item.category || "Varios");
+        setEditProdBarcode(item.barcode || "");
+        setEditProdUnitType(item.unit_type || "unid");
+        setEditProdRequiresExpiration(false);
+        setEditBranchPrice("");
+      }
+    }
   };
 
   const saveIngressCorrection = async () => {
@@ -676,25 +780,74 @@ export default function App() {
       return alert("Cantidad o costo inválido.");
     }
 
+    let expirationIso = null;
+    if (editIngressExpiration.trim()) {
+      const expRes = validateAndConvertDate(editIngressExpiration);
+      if (!expRes.isValid) {
+        return alert("Vencimiento inválido. Formato esperado DD/MM/AAAA.");
+      }
+      expirationIso = expRes.iso;
+    }
+
+    const newPrice = parseFloat(String(editBranchPrice).replace(",", "."));
+    if (!Number.isFinite(newPrice) || newPrice < 0) {
+      return alert("Precio de venta de la sucursal inválido.");
+    }
+
     try {
       setLoading(true);
+      const productId = editingIngress.product_id;
+
+      // 1. Actualizar datos maestros del producto si cambiaron
+      if (productId) {
+        await updateProduct(productId, {
+          name: editProdName.trim() || undefined,
+          brand: editProdBrand.trim() || null,
+          category: editProdCategory.trim() || undefined,
+          barcode: editProdBarcode.trim() || null,
+          unit_type: editProdUnitType,
+          requires_expiration: editProdRequiresExpiration
+        });
+      }
+
+      // 2. Actualizar precio de venta de la sucursal actual preservando is_available, is_exclusive, minimum_stock
+      if (productId && branchId) {
+        let currentBranchProd = null;
+        try {
+          const bpList = await fetchBranchProductsAdmin(branchId);
+          currentBranchProd = bpList.find(x => x.product_id === productId);
+        } catch (errBranch) {
+          // fallback
+        }
+
+        await configureBranchProduct(branchId, productId, {
+          price_per_unit: newPrice,
+          is_available: currentBranchProd ? currentBranchProd.is_available : true,
+          is_exclusive: currentBranchProd ? currentBranchProd.is_exclusive : false,
+          minimum_stock: currentBranchProd ? currentBranchProd.minimum_stock : null
+        });
+      }
+
+      // 3. Ejecutar updateIngress para corregir el ingreso
       const targetId = editingIngress.ingress_id ?? editingIngress.id;
       await updateIngress(targetId, {
         quantity: qty,
         cost_price: cost,
         supplier: editIngressSupplier.trim() || null,
         lot_number: editIngressLot.trim() || null,
-        expiration_date: editIngressExpiration.trim() || null,
+        expiration_date: editProdRequiresExpiration ? expirationIso : null,
         actor: email,
         reason: editIngressReason.trim()
       }, branchId || 1);
-      alert("Ingreso corregido y auditado.");
+
+      // 4 a 8. Refrescar productos, historial, salir de edición y mostrar mensaje de éxito único
+      alert("✅ Corrección guardada exitosamente.");
       setEditingIngress(null);
       setEditIngressReason("");
       await loadIngressHistory();
       await loadInitialData();
     } catch (e) {
-      alert("Error: " + e.message);
+      alert("Error: " + (e.message || "No se pudo completar la operación"));
     } finally {
       setLoading(false);
     }
@@ -704,13 +857,15 @@ export default function App() {
     const qty=parseFloat((prodStock || '').replace(',','.')), cost=parseFloat((prodCost || '').replace(',','.')), price=parseFloat((prodPrice || '').replace(',','.'));
     if (!prodName.trim() || !Number.isFinite(qty) || qty<=0 || !Number.isFinite(cost) || cost<0 || !Number.isFinite(price)) return alert('Completá producto, costo, PVP y cantidad.');
     if (!ingressProductId && !prodCategory.trim()) return alert('Seleccioná o escribí una categoría.');
-    if (prodRequiresExpiration && !prodExpirationDate.trim()) return alert('Este producto requiere fecha de vencimiento.');
-    if (prodRequiresExpiration && !/^\d{2}-\d{2}-\d{4}$/.test(prodExpirationDate.trim())) return alert('Vencimiento invalido. Usa DD-MM-AAAA.');
+    
+    let expirationIso = null;
     if (prodRequiresExpiration) {
-      const [dd,mm,yyyy]=prodExpirationDate.trim().split('-').map(Number);
-      const d=new Date(yyyy,mm-1,dd);
-      if(d.getFullYear()!==yyyy || d.getMonth()!==mm-1 || d.getDate()!==dd) return alert('La fecha de vencimiento no existe.');
+      if (!prodExpirationDate.trim()) return alert('Este producto requiere fecha de vencimiento.');
+      const valRes = validateAndConvertDate(prodExpirationDate);
+      if (!valRes.isValid) return alert('Vencimiento inválido. Usa formato DD/MM/AAAA.');
+      expirationIso = valRes.iso;
     }
+
     try {
       setLoading(true); let productId=ingressProductId;
       if (!productId) {
@@ -732,7 +887,7 @@ export default function App() {
           visual_presentation: prodVisualPresentation
         });
       }
-      await createIngress({product_id:productId,supplier:prodSupplier||null,cost_price:cost,quantity:qty,lot_number:prodLotNumber||null,expiration_date:prodRequiresExpiration?prodExpirationDate:null,received_by:email,notes:'Ingreso desde App V2'}, branchId || 1);
+      await createIngress({product_id:productId,supplier:prodSupplier||null,cost_price:cost,quantity:qty,lot_number:prodLotNumber||null,expiration_date:expirationIso,received_by:email,notes:'Ingreso desde App V2'}, branchId || 1);
       alert('Ingreso y lote registrados correctamente'); resetIngressForm(); await loadInitialData();
     } catch(e) { alert('Error: '+e.message); } finally { setLoading(false); }
   };
@@ -3573,196 +3728,315 @@ return (
         {currentTab === 'ingresos' && (canIngreso || isAdminLevel) && (
           <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>📥 Ingreso de Mercadería</Text>
-            <View style={styles.card}>
-              <Text style={styles.subSectionTitle}>1. Identificar producto</Text>
-              <TouchableOpacity style={styles.buttonCamera} onPress={() => toggleCamera('ingreso')}><Text style={styles.buttonText}>{showCamera && cameraTarget==='ingreso' ? '📷 Cerrar Escáner' : '📷 Escanear EAN'}</Text></TouchableOpacity>
-              {showCamera && cameraTarget==='ingreso' && permission?.granted && <View style={styles.cameraContainer}><CameraView style={StyleSheet.absoluteFillObject} facing="back" onBarcodeScanned={scanned ? undefined : handleBarcodeScanned} /></View>}
-              <TextInput style={styles.input} placeholder="EAN (opcional)" value={prodBarcode} onChangeText={setProdBarcode} onEndEditing={() => prodBarcode && lookupIngressEAN(prodBarcode)} keyboardType="numeric" />
-              <TextInput style={styles.searchInput} placeholder="🔍 O buscar producto por nombre..." value={ingressSearch} onChangeText={handleIngressSearch} />
-              {ingressMatches.length>0 && <View style={styles.dropdownContainer}>{ingressMatches.map(p=><TouchableOpacity key={p.id} style={styles.dropdownItem} onPress={()=>selectIngressProduct(p)}><Text style={{fontWeight:'bold'}}>{p.name}</Text><Text style={{fontSize:11,color:'#666'}}>EAN: {p.barcode || 'Sin EAN'} | Stock: {p.stock} {p.unit_type}</Text></TouchableOpacity>)}</View>}
-              <Text style={{fontSize:12,color:ingressProductId?'#28a745':'#666',marginBottom:8}}>{ingressProductId ? `✓ Producto existente #${ingressProductId}` : 'Producto nuevo / sin EAN'}</Text>
-              <TextInput style={styles.input} placeholder="Nombre del producto" value={prodName} onChangeText={setProdName} editable={!ingressProductId} />
-              <TextInput style={styles.input} placeholder="Marca (opcional)" value={prodBrand} onChangeText={setProdBrand} editable={!ingressProductId} />
-              
-              <Text style={{fontWeight:'bold',marginTop:8,marginBottom:4}}>Presentación para carteles</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:10}}>
-                {[
-                  ['horma_redonda', 'Horma redonda'],
-                  ['horma_rectangular', 'Horma rectangular'],
-                  ['barra', 'Barra'],
-                  ['embutido_entero', 'Embutido entero'],
-                  ['jamon_entero', 'Jamón entero'],
-                  ['botella', 'Botella'],
-                  ['paquete', 'Paquete'],
-                  ['unidad', 'Unidad / pieza'],
-                  ['otro', 'Otro']
-                ].map(([vKey, vLabel]) => (
-                  <TouchableOpacity
-                    key={vKey}
-                    style={[styles.typeBtn, { marginRight: 6, paddingHorizontal: 10 }, prodVisualPresentation === vKey && { backgroundColor: '#007bff' }]}
-                    onPress={() => setProdVisualPresentation(vKey)}
-                  >
-                    <Text style={{ fontSize: 11, color: prodVisualPresentation === vKey ? '#fff' : '#333', fontWeight: 'bold' }}>{vLabel}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
 
-              <Text style={{fontWeight:'bold',marginTop:8,marginBottom:6}}>
-                ¿Este producto tiene vencimiento?
-              </Text>
+            {/* SECCIÓN DE HISTORIAL Y BÚSQUEDA (SI NO ESTÁ EDITANDO) */}
+            {!editingIngress && (
+              <>
+                <View style={styles.card}>
+                  <Text style={styles.subSectionTitle}>1. Identificar producto</Text>
+                  <TouchableOpacity style={styles.buttonCamera} onPress={() => toggleCamera('ingreso')}><Text style={styles.buttonText}>{showCamera && cameraTarget==='ingreso' ? '📷 Cerrar Escáner' : '📷 Escanear EAN'}</Text></TouchableOpacity>
+                  {showCamera && cameraTarget==='ingreso' && permission?.granted && <View style={styles.cameraContainer}><CameraView style={StyleSheet.absoluteFillObject} facing="back" onBarcodeScanned={scanned ? undefined : handleBarcodeScanned} /></View>}
+                  <TextInput style={styles.input} placeholder="EAN (opcional)" value={prodBarcode} onChangeText={setProdBarcode} onEndEditing={() => prodBarcode && lookupIngressEAN(prodBarcode)} keyboardType="numeric" />
+                  <TextInput style={styles.searchInput} placeholder="🔍 O buscar producto por nombre..." value={ingressSearch} onChangeText={handleIngressSearch} />
+                  {ingressMatches.length>0 && <View style={styles.dropdownContainer}>{ingressMatches.map(p=><TouchableOpacity key={p.id} style={styles.dropdownItem} onPress={()=>selectIngressProduct(p)}><Text style={{fontWeight:'bold'}}>{p.name}</Text><Text style={{fontSize:11,color:'#666'}}>EAN: {p.barcode || 'Sin EAN'} | Stock: {p.stock} {p.unit_type}</Text></TouchableOpacity>)}</View>}
+                  <Text style={{fontSize:12,color:ingressProductId?'#28a745':'#666',marginBottom:8}}>{ingressProductId ? `✓ Producto existente #${ingressProductId}` : 'Producto nuevo / sin EAN'}</Text>
+                  <TextInput style={styles.input} placeholder="Nombre del producto" value={prodName} onChangeText={setProdName} editable={!ingressProductId} />
+                  <TextInput style={styles.input} placeholder="Marca (opcional)" value={prodBrand} onChangeText={setProdBrand} editable={!ingressProductId} />
+                  
+                  <Text style={{fontWeight:'bold',marginTop:8,marginBottom:4}}>Presentación para carteles</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:10}}>
+                    {[
+                      ['horma_redonda', 'Horma redonda'],
+                      ['horma_rectangular', 'Horma rectangular'],
+                      ['barra', 'Barra'],
+                      ['embutido_entero', 'Embutido entero'],
+                      ['jamon_entero', 'Jamón entero'],
+                      ['botella', 'Botella'],
+                      ['paquete', 'Paquete'],
+                      ['unidad', 'Unidad / pieza'],
+                      ['otro', 'Otro']
+                    ].map(([vKey, vLabel]) => (
+                      <TouchableOpacity
+                        key={vKey}
+                        style={[styles.typeBtn, { marginRight: 6, paddingHorizontal: 10 }, prodVisualPresentation === vKey && { backgroundColor: '#007bff' }]}
+                        onPress={() => setProdVisualPresentation(vKey)}
+                      >
+                        <Text style={{ fontSize: 11, color: prodVisualPresentation === vKey ? '#fff' : '#333', fontWeight: 'bold' }}>{vLabel}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
 
-              <View style={{flexDirection:'row',marginBottom:10}}>
-                <TouchableOpacity
-                  style={[styles.typeBtn,!prodRequiresExpiration && styles.typeBtnActive]}
-                  onPress={() => {
-                    setProdRequiresExpiration(false);
-                    setProdExpirationDate('');
-                  }}
-                >
-                  <Text style={{color:!prodRequiresExpiration?'#fff':'#333',fontWeight:'bold'}}>
-                    NO
+                  <Text style={{fontWeight:'bold',marginTop:8,marginBottom:6}}>
+                    ¿Este producto tiene vencimiento?
                   </Text>
-                </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={[styles.typeBtn,prodRequiresExpiration && styles.typeBtnActive,{marginLeft:8}]}
-                  onPress={() => setProdRequiresExpiration(true)}
-                >
-                  <Text style={{color:prodRequiresExpiration?'#fff':'#333',fontWeight:'bold'}}>
-                    SÍ
-                  </Text>
-                </TouchableOpacity>
-              </View>
+                  <View style={{flexDirection:'row',marginBottom:10}}>
+                    <TouchableOpacity
+                      style={[styles.typeBtn,!prodRequiresExpiration && styles.typeBtnActive]}
+                      onPress={() => {
+                        setProdRequiresExpiration(false);
+                        setProdExpirationDate('');
+                      }}
+                    >
+                      <Text style={{color:!prodRequiresExpiration?'#fff':'#333',fontWeight:'bold'}}>
+                        NO
+                      </Text>
+                    </TouchableOpacity>
 
-              <Text style={{fontSize:12,fontWeight:'bold',color:'#555',marginBottom:4}}>Categoría</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Seleccionar / escribir categoría"
-                value={prodCategory}
-                onChangeText={setProdCategory}
-                editable={!ingressProductId}
-              />
-              <Text style={styles.subSectionTitle}>2. Datos del lote / compra</Text>
-              <TextInput style={styles.input} placeholder="Proveedor" value={prodSupplier} onChangeText={setProdSupplier} />
-              <TextInput style={styles.input} placeholder="N° de lote (opcional)" value={prodLotNumber} onChangeText={setProdLotNumber} />
-              <TextInput style={styles.input} placeholder="Costo de compra ($)" keyboardType="decimal-pad" value={prodCost} onChangeText={setProdCost} />
-              <TextInput style={styles.input} placeholder="Precio PVP ($)" keyboardType="decimal-pad" value={prodPrice} onChangeText={setProdPrice} />
-              <TextInput style={styles.input} placeholder={`Cantidad (${prodUnitType})`} keyboardType="decimal-pad" value={prodStock} onChangeText={setProdStock} />
-              <View style={{flexDirection:'row',marginBottom:10}}>{['unid','kg'].map(t=><TouchableOpacity key={t} style={[styles.typeBtn,{marginRight:8},prodUnitType===t&&{backgroundColor:'#007bff'}]} onPress={()=>setProdUnitType(t)}><Text style={{color:prodUnitType===t?'#fff':'#333',fontWeight:'bold'}}>{t==='kg'?'⚖ Peso (kg)':'📦 Unidad'}</Text></TouchableOpacity>)}</View>
+                    <TouchableOpacity
+                      style={[styles.typeBtn,prodRequiresExpiration && styles.typeBtnActive,{marginLeft:8}]}
+                      onPress={() => setProdRequiresExpiration(true)}
+                    >
+                      <Text style={{color:prodRequiresExpiration?'#fff':'#333',fontWeight:'bold'}}>
+                        SÍ
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
 
-              {prodRequiresExpiration && <>
-                <Text style={{fontSize:12,fontWeight:'bold',color:'#555'}}>Vencimiento (DD-MM-AAAA)</Text>
-                <TextInput
-                  style={styles.inputHighlight}
-                  placeholder="Ej: 31-10-2027"
-                  value={prodExpirationDate}
-                  maxLength={10}
-                  onChangeText={(value) => {
-                    const digits=value.replace(/\D/g,'').slice(0,8);
-                    let formatted=digits;
-                    if(digits.length>4) formatted=digits.slice(0,2)+'-'+digits.slice(2,4)+'-'+digits.slice(4);
-                    else if(digits.length>2) formatted=digits.slice(0,2)+'-'+digits.slice(2);
-                    setProdExpirationDate(formatted);
-                  }}
-                  keyboardType="number-pad"
-                />
-                <Text style={{fontSize:11,color:'#777',marginBottom:8}}>Solo numeros. El sistema valida la fecha al guardar.</Text>
-              </>}
-              <TouchableOpacity style={[styles.buttonSuccess,{marginTop:12}]} onPress={handleSaveIngressV2} disabled={loading}><Text style={styles.buttonText}>💾 Registrar ingreso y lote</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.buttonPrimary,{backgroundColor:'#6c757d'}]} onPress={resetIngressForm}><Text style={styles.buttonText}>Limpiar formulario</Text></TouchableOpacity>
-            </View>
-
-            {isAdminLevel && (
-              <View style={styles.card}>
-                <Text style={styles.subSectionTitle}>📋 Historial de ingresos</Text>
-                <Text style={{fontSize:11,color:'#666',marginBottom:8}}>Busca un ingreso antiguo para corregirlo fácilmente sin recordar el ID exacto.</Text>
-
-                <TextInput 
-                  style={styles.input} 
-                  placeholder="Buscar [ Producto, EAN, proveedor o lote ]" 
-                  value={ingressHistorySearch} 
-                  onChangeText={setIngressHistorySearch} 
-                />
-                <View style={{ flexDirection: 'row', marginBottom: 8 }}>
-                  <TextInput 
-                    style={[styles.input, { flex: 1, marginRight: 4, marginBottom: 0 }]} 
-                    placeholder="Desde YYYY-MM-DD" 
-                    value={ingressHistoryDateFrom} 
-                    onChangeText={setIngressHistoryDateFrom} 
+                  <Text style={{fontSize:12,fontWeight:'bold',color:'#555',marginBottom:4}}>Categoría</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Seleccionar / escribir categoría"
+                    value={prodCategory}
+                    onChangeText={setProdCategory}
+                    editable={!ingressProductId}
                   />
-                  <TextInput 
-                    style={[styles.input, { flex: 1, marginLeft: 4, marginBottom: 0 }]} 
-                    placeholder="Hasta YYYY-MM-DD" 
-                    value={ingressHistoryDateTo} 
-                    onChangeText={setIngressHistoryDateTo} 
-                  />
+                  <Text style={styles.subSectionTitle}>2. Datos del lote / compra</Text>
+                  <TextInput style={styles.input} placeholder="Proveedor" value={prodSupplier} onChangeText={setProdSupplier} />
+                  <TextInput style={styles.input} placeholder="N° de lote (opcional)" value={prodLotNumber} onChangeText={setProdLotNumber} />
+                  <TextInput style={styles.input} placeholder="Costo de compra ($)" keyboardType="decimal-pad" value={prodCost} onChangeText={setProdCost} />
+                  <TextInput style={styles.input} placeholder="Precio PVP ($)" keyboardType="decimal-pad" value={prodPrice} onChangeText={setProdPrice} />
+                  <TextInput style={styles.input} placeholder={`Cantidad (${prodUnitType})`} keyboardType="decimal-pad" value={prodStock} onChangeText={setProdStock} />
+                  <View style={{flexDirection:'row',marginBottom:10}}>{['unid','kg'].map(t=><TouchableOpacity key={t} style={[styles.typeBtn,{marginRight:8},prodUnitType===t&&{backgroundColor:'#007bff'}]} onPress={()=>setProdUnitType(t)}><Text style={{color:prodUnitType===t?'#fff':'#333',fontWeight:'bold'}}>{t==='kg'?'⚖ Peso (kg)':'📦 Unidad'}</Text></TouchableOpacity>)}</View>
+
+                  {prodRequiresExpiration && <>
+                    <Text style={{fontSize:12,fontWeight:'bold',color:'#555'}}>Vencimiento (DD/MM/AAAA)</Text>
+                    <TextInput
+                      style={styles.inputHighlight}
+                      placeholder="Ej: 31/10/2027"
+                      value={prodExpirationDate}
+                      maxLength={10}
+                      onChangeText={(value) => {
+                        setProdExpirationDate(applyDateMask(value));
+                      }}
+                      keyboardType="number-pad"
+                    />
+                    <Text style={{fontSize:11,color:'#777',marginBottom:8}}>Solo números. Se aplica formato automático DD/MM/AAAA.</Text>
+                  </>}
+                  <TouchableOpacity style={[styles.buttonSuccess,{marginTop:12}]} onPress={handleSaveIngressV2} disabled={loading}><Text style={styles.buttonText}>💾 Registrar ingreso y lote</Text></TouchableOpacity>
+                  <TouchableOpacity style={[styles.buttonPrimary,{backgroundColor:'#6c757d'}]} onPress={resetIngressForm}><Text style={styles.buttonText}>Limpiar formulario</Text></TouchableOpacity>
                 </View>
 
-                <View style={{ flexDirection: 'row', marginBottom: 12 }}>
-                  <TouchableOpacity style={[styles.buttonPrimary, { flex: 1, marginRight: 5, marginTop: 0 }]} onPress={loadIngressHistory} disabled={ingressHistoryLoading}>
-                    <Text style={styles.buttonText}>{ingressHistoryLoading ? 'Buscando...' : '🔎 Buscar'}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.buttonPrimary, { flex: 1, marginLeft: 5, marginTop: 0, backgroundColor: '#6c757d' }]} onPress={() => { setIngressHistorySearch(''); setIngressHistoryDateFrom(''); setIngressHistoryDateTo(''); setIngressHistory([]); setShowIngressHistory(false); }}>
-                    <Text style={styles.buttonText}>🧹 Limpiar</Text>
-                  </TouchableOpacity>
-                </View>
+                {isAdminLevel && (
+                  <View style={styles.card}>
+                    <Text style={styles.subSectionTitle}>📋 Historial de ingresos</Text>
+                    <Text style={{fontSize:11,color:'#666',marginBottom:8}}>Busca un ingreso antiguo para corregirlo fácilmente sin recordar el ID exacto.</Text>
 
-                {showIngressHistory && (
-                  <>
-                    {ingressHistory.length === 0 ? (
-                      <Text style={{ textAlign: 'center', color: '#888', fontStyle: 'italic', padding: 15 }}>No se encontraron ingresos.</Text>
-                    ) : (
-                      ingressHistory.map(item => {
-                        const recId = item.ingress_id ?? item.id;
-                        const prodNameStr = item.product_name || item.name || `Producto #${item.product_id}`;
-                        const eanVal = item.barcode || '-';
-                        const qtyVal = item.quantity ?? '-';
-                        const unitVal = item.unit_type || 'unid';
-                        const costVal = formatMoney(item.unit_cost ?? item.cost_price ?? 0);
-                        const supplierVal = item.supplier || '-';
-                        const lotVal = item.lot_code ?? (item.lot_number || '-');
-                        const expVal = item.expiration_date || '-';
-                        const dateValRaw = item.received_at || item.created_at;
-                        const dateVal = dateValRaw ? new Date(dateValRaw).toLocaleString('es-AR') : '-';
+                    <TextInput 
+                      style={styles.input} 
+                      placeholder="Buscar [ Producto, EAN, proveedor o lote ]" 
+                      value={ingressHistorySearch} 
+                      onChangeText={setIngressHistorySearch} 
+                    />
+                    <View style={{ flexDirection: 'row', marginBottom: 8 }}>
+                      <TextInput 
+                        style={[styles.input, { flex: 1, marginRight: 4, marginBottom: 0 }]} 
+                        placeholder="Desde DD/MM/AAAA" 
+                        value={ingressHistoryDateFrom} 
+                        maxLength={10}
+                        onChangeText={(val) => setIngressHistoryDateFrom(applyDateMask(val))}
+                        keyboardType="number-pad"
+                      />
+                      <TextInput 
+                        style={[styles.input, { flex: 1, marginLeft: 4, marginBottom: 0 }]} 
+                        placeholder="Hasta DD/MM/AAAA" 
+                        value={ingressHistoryDateTo} 
+                        maxLength={10}
+                        onChangeText={(val) => setIngressHistoryDateTo(applyDateMask(val))}
+                        keyboardType="number-pad"
+                      />
+                    </View>
 
-                        return (
-                          <View key={recId} style={{ backgroundColor: '#f8f9fa', padding: 12, borderRadius: 8, marginBottom: 10, borderWidth: 1, borderColor: '#dee2e6' }}>
-                            <Text style={{ fontWeight: 'bold', fontSize: 15, color: '#222', marginBottom: 2 }}>{prodNameStr}</Text>
-                            <Text style={{ fontSize: 12, color: '#555' }}>EAN: {eanVal}</Text>
-                            <Text style={{ fontSize: 12, color: '#555' }}>Ingreso #{recId}</Text>
-                            <Text style={{ fontSize: 12, marginTop: 4 }}>Cantidad: {qtyVal} {unitVal}</Text>
-                            <Text style={{ fontSize: 12 }}>Costo: {costVal}</Text>
-                            <Text style={{ fontSize: 12 }}>Proveedor: {supplierVal}</Text>
-                            <Text style={{ fontSize: 12 }}>Lote: {lotVal}</Text>
-                            <Text style={{ fontSize: 12 }}>Vencimiento: {expVal}</Text>
-                            <Text style={{ fontSize: 12 }}>Ingreso: {dateVal}</Text>
+                    <View style={{ flexDirection: 'row', marginBottom: 12 }}>
+                      <TouchableOpacity style={[styles.buttonPrimary, { flex: 1, marginRight: 5, marginTop: 0 }]} onPress={loadIngressHistory} disabled={ingressHistoryLoading}>
+                        <Text style={styles.buttonText}>{ingressHistoryLoading ? 'Buscando...' : '🔎 Buscar'}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[styles.buttonPrimary, { flex: 1, marginLeft: 5, marginTop: 0, backgroundColor: '#6c757d' }]} onPress={() => { setIngressHistorySearch(''); setIngressHistoryDateFrom(''); setIngressHistoryDateTo(''); setIngressHistory([]); setShowIngressHistory(false); }}>
+                        <Text style={styles.buttonText}>🧹 Limpiar</Text>
+                      </TouchableOpacity>
+                    </View>
 
-                            <TouchableOpacity style={[styles.buttonPrimary, { backgroundColor: '#fd7e14', marginTop: 8 }]} onPress={() => beginIngressCorrection(item)}>
-                              <Text style={styles.buttonText}>✏️ Corregir ingreso</Text>
-                            </TouchableOpacity>
-                          </View>
-                        );
-                      })
+                    {showIngressHistory && (
+                      <>
+                        {ingressHistory.length === 0 ? (
+                          <Text style={{ textAlign: 'center', color: '#888', fontStyle: 'italic', padding: 15 }}>No se encontraron ingresos.</Text>
+                        ) : (
+                          ingressHistory.map(item => {
+                            const recId = item.ingress_id ?? item.id;
+                            const prodNameStr = item.product_name || item.name || `Producto #${item.product_id}`;
+                            const eanVal = item.barcode || 'Sin EAN';
+                            const categoryVal = item.category || 'Varios';
+                            const brandVal = item.brand || null;
+                            const qtyVal = item.quantity ?? '-';
+                            const unitVal = item.unit_type || 'unid';
+                            const costVal = formatMoney(item.unit_cost ?? item.cost_price ?? 0);
+                            const supplierVal = item.supplier || 'Desconocido';
+                            const lotVal = item.lot_code ?? (item.lot_number || null);
+                            const expVal = item.expiration_date ? (item.expiration_date.includes('-') && item.expiration_date.split('-')[0].length === 4 ? `${item.expiration_date.split('T')[0].split('-')[2]}/${item.expiration_date.split('T')[0].split('-')[1]}/${item.expiration_date.split('T')[0].split('-')[0]}` : item.expiration_date) : 'Sin vencimiento';
+                            
+                            // Fecha de ingreso
+                            let dateVal = '-';
+                            const dateValRaw = item.received_at_formatted || item.received_at || item.created_at;
+                            if (item.received_at_formatted) {
+                              dateVal = item.received_at_formatted;
+                            } else if (dateValRaw) {
+                              const dt = new Date(dateValRaw);
+                              if (!isNaN(dt.getTime())) {
+                                const day = String(dt.getDate()).padStart(2, '0');
+                                const month = String(dt.getMonth() + 1).padStart(2, '0');
+                                const year = dt.getFullYear();
+                                const hours = String(dt.getHours()).padStart(2, '0');
+                                const mins = String(dt.getMinutes()).padStart(2, '0');
+                                dateVal = `${day}/${month}/${year} · ${hours}:${mins} hs`;
+                              } else {
+                                dateVal = dateValRaw;
+                              }
+                            }
+
+                            // Precio de venta sucursal actual si está disponible
+                            const currentBranchPriceVal = item.branch_price ?? item.price_per_unit;
+                            const branchPriceStr = currentBranchPriceVal != null ? formatMoney(currentBranchPriceVal) : 'No disponible';
+
+                            return (
+                              <View key={recId} style={{ backgroundColor: '#f8f9fa', padding: 12, borderRadius: 8, marginBottom: 12, borderWidth: 1, borderColor: '#dee2e6' }}>
+                                <Text style={{ fontWeight: 'bold', fontSize: 16, color: '#222', marginBottom: 2 }}>{prodNameStr}</Text>
+                                <Text style={{ fontSize: 12, color: '#555', marginBottom: 4 }}>{eanVal} · {categoryVal}{brandVal ? ` · ${brandVal}` : ''}</Text>
+                                <Text style={{ fontSize: 12, color: '#333', marginBottom: 8, fontWeight: '600' }}>Ingreso #{recId} · {dateVal}</Text>
+
+                                <Text style={{ fontSize: 13, color: '#222', marginBottom: 2 }}>{qtyVal} {unitVal}</Text>
+                                <Text style={{ fontSize: 13, color: '#222', marginBottom: 2 }}>Costo: {costVal} c/u</Text>
+                                <Text style={{ fontSize: 13, color: '#222', marginBottom: 2 }}>Proveedor: {supplierVal}</Text>
+                                <Text style={{ fontSize: 13, color: '#222', marginBottom: 2 }}>Vencimiento: {expVal}</Text>
+                                <Text style={{ fontSize: 13, color: '#222', marginBottom: 4 }}>Precio Feria actual: {branchPriceStr}</Text>
+                                {lotVal && <Text style={{ fontSize: 11, color: '#777', fontStyle: 'italic', marginBottom: 6 }}>Lote: {lotVal}</Text>}
+
+                                <TouchableOpacity style={[styles.buttonPrimary, { backgroundColor: '#fd7e14', marginTop: 6 }]} onPress={() => beginIngressCorrection(item)}>
+                                  <Text style={styles.buttonText}>✏️ Editar / corregir</Text>
+                                </TouchableOpacity>
+                              </View>
+                            );
+                          })
+                        )}
+                      </>
                     )}
-                  </>
+                  </View>
                 )}
-              </View>
+              </>
             )}
 
-          {isAdminLevel && editingIngress && (
+            {/* SECCIÓN DE EDICIÓN AMPLIADA (MODO EDICIÓN ACTIVO) */}
+            {isAdminLevel && editingIngress && (
               <View style={styles.card}>
-                <Text style={styles.subSectionTitle}>Corrigiendo ingreso #{editingIngress.ingress_id ?? editingIngress.id}</Text>
-                <TextInput style={styles.input} placeholder="Cantidad" keyboardType="decimal-pad" value={editIngressQty} onChangeText={setEditIngressQty}/>
-                <TextInput style={styles.input} placeholder="Costo" keyboardType="decimal-pad" value={editIngressCost} onChangeText={setEditIngressCost}/>
-                <TextInput style={styles.input} placeholder="Proveedor" value={editIngressSupplier} onChangeText={setEditIngressSupplier}/>
-                <TextInput style={styles.input} placeholder="Numero de lote" value={editIngressLot} onChangeText={setEditIngressLot}/>
-                <TextInput style={styles.input} placeholder="Vencimiento DD-MM-AAAA" value={editIngressExpiration} onChangeText={setEditIngressExpiration} keyboardType="numbers-and-punctuation"/>
-                <TextInput style={styles.inputHighlight} placeholder="Motivo obligatorio de la correccion" value={editIngressReason} onChangeText={setEditIngressReason}/>
-                <TouchableOpacity style={styles.buttonSuccess} onPress={saveIngressCorrection} disabled={loading}>
-                  <Text style={styles.buttonText}>Guardar correccion auditada</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, borderBottomWidth: 1, borderBottomColor: '#eee', pb: 8 }}>
+                  <View>
+                    <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#fd7e14' }}>Editar ingreso #{editingIngress.ingress_id ?? editingIngress.id}</Text>
+                    <Text style={{ fontSize: 13, color: '#555', fontWeight: '600' }}>Producto: {editProdName || editingIngress.product_name || editingIngress.name || 'Sin nombre'}</Text>
+                  </View>
+                  <TouchableOpacity style={{ backgroundColor: '#6c757d', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 }} onPress={() => setEditingIngress(null)}>
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>← Volver al historial</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* BLOQUE A: Datos del producto */}
+                <View style={{ backgroundColor: '#f8f9fa', padding: 12, borderRadius: 8, marginBottom: 15, borderWidth: 1, borderColor: '#e9ecef' }}>
+                  <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#007bff', marginBottom: 10 }}>📦 Datos del producto</Text>
+
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#444', marginBottom: 2 }}>Nombre</Text>
+                  <TextInput style={styles.input} placeholder="Nombre del producto" value={editProdName} onChangeText={setEditProdName} />
+
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#444', marginBottom: 2 }}>Marca</Text>
+                  <TextInput style={styles.input} placeholder="Marca" value={editProdBrand} onChangeText={setEditProdBrand} />
+
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#444', marginBottom: 2 }}>Categoría</Text>
+                  <TextInput style={styles.input} placeholder="Categoría" value={editProdCategory} onChangeText={setEditProdCategory} />
+
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#444', marginBottom: 2 }}>EAN / barcode</Text>
+                  <TextInput style={styles.input} placeholder="EAN" value={editProdBarcode} onChangeText={setEditProdBarcode} keyboardType="numeric" />
+
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#444', marginBottom: 4 }}>Tipo de unidad</Text>
+                  <View style={{ flexDirection: 'row', marginBottom: 10 }}>
+                    {['unid', 'kg'].map(t => (
+                      <TouchableOpacity 
+                        key={t} 
+                        style={[styles.typeBtn, { marginRight: 8 }, editProdUnitType === t && { backgroundColor: '#007bff' }]} 
+                        onPress={() => setEditProdUnitType(t)}
+                      >
+                        <Text style={{ color: editProdUnitType === t ? '#fff' : '#333', fontWeight: 'bold' }}>
+                          {t === 'kg' ? '⚖ kg' : '📦 unid'}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#444', marginBottom: 4 }}>Requiere vencimiento</Text>
+                  <View style={{ flexDirection: 'row', marginBottom: 10 }}>
+                    <TouchableOpacity 
+                      style={[styles.typeBtn, !editProdRequiresExpiration && styles.typeBtnActive]} 
+                      onPress={() => setEditProdRequiresExpiration(false)}
+                    >
+                      <Text style={{ color: !editProdRequiresExpiration ? '#fff' : '#333', fontWeight: 'bold' }}>No</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={[styles.typeBtn, editProdRequiresExpiration && styles.typeBtnActive, { marginLeft: 8 }]} 
+                      onPress={() => setEditProdRequiresExpiration(true)}
+                    >
+                      <Text style={{ color: editProdRequiresExpiration ? '#fff' : '#333', fontWeight: 'bold' }}>Sí</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#444', marginBottom: 2 }}>
+                    {branchId === 2 ? "Precio de venta — Feria Damyale" : "Precio de venta — Fiambrería Local"} ($)
+                  </Text>
+                  <TextInput style={styles.input} placeholder="Precio de venta" value={editBranchPrice} onChangeText={setEditBranchPrice} keyboardType="decimal-pad" />
+                </View>
+
+                {/* BLOQUE B: Datos de este ingreso */}
+                <View style={{ backgroundColor: '#f8f9fa', padding: 12, borderRadius: 8, marginBottom: 15, borderWidth: 1, borderColor: '#e9ecef' }}>
+                  <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#fd7e14', marginBottom: 10 }}>📥 Datos de este ingreso</Text>
+
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#444', marginBottom: 2 }}>Cantidad</Text>
+                  <TextInput style={styles.input} placeholder="Cantidad" value={editIngressQty} onChangeText={setEditIngressQty} keyboardType="decimal-pad" />
+
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#444', marginBottom: 2 }}>Costo de compra ($)</Text>
+                  <TextInput style={styles.input} placeholder="Costo" value={editIngressCost} onChangeText={setEditIngressCost} keyboardType="decimal-pad" />
+
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#444', marginBottom: 2 }}>Proveedor</Text>
+                  <TextInput style={styles.input} placeholder="Proveedor" value={editIngressSupplier} onChangeText={setEditIngressSupplier} />
+
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#444', marginBottom: 2 }}>Número de lote</Text>
+                  <TextInput style={styles.input} placeholder="Número de lote" value={editIngressLot} onChangeText={setEditIngressLot} />
+
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#444', marginBottom: 2 }}>Vencimiento (DD/MM/AAAA)</Text>
+                  <TextInput 
+                    style={styles.input} 
+                    placeholder="DD/MM/AAAA" 
+                    value={editIngressExpiration} 
+                    maxLength={10}
+                    onChangeText={(val) => setEditIngressExpiration(applyDateMask(val))} 
+                    keyboardType="number-pad" 
+                  />
+                </View>
+
+                {/* MOTIVO Y AUDITORÍA */}
+                <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#d32f2f', marginBottom: 4 }}>Motivo obligatorio de la corrección *</Text>
+                <TextInput style={styles.inputHighlight} placeholder="Detallá el motivo de la corrección..." value={editIngressReason} onChangeText={setEditIngressReason} />
+
+                <TouchableOpacity style={[styles.buttonSuccess, { backgroundColor: '#28a745', marginTop: 10 }]} onPress={saveIngressCorrection} disabled={loading}>
+                  <Text style={styles.buttonText}>💾 Guardar corrección auditada</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={[styles.buttonPrimary,{backgroundColor:'#6c757d'}]} onPress={() => setEditingIngress(null)}>
-                  <Text style={styles.buttonText}>Cancelar</Text>
+
+                <TouchableOpacity style={[styles.buttonPrimary, { backgroundColor: '#6c757d', marginTop: 8 }]} onPress={() => setEditingIngress(null)}>
+                  <Text style={styles.buttonText}>← Volver al historial</Text>
                 </TouchableOpacity>
               </View>
             )}
