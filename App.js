@@ -9,6 +9,19 @@ import FairDayPlanner from './FairDayPlanner';
 import PosterMaker from './PosterMaker';
 import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProfitability, fetchMasterProductByBarcode, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, updateIngress, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled, actOnAlert, fetchAlertHistory, updateReplenishmentPolicy, fetchBranchProductsAdmin, configureBranchProduct, removeBranchProduct, fetchLatestProductAudit, fetchSalesHistory, fetchSaleDetail, fetchPromotions, fetchPromotionDetail, createPromotion, updatePromotion, deletePromotion, calculatePromotion, fetchIngressHistory } from './api';
 
+// Presentaciones visuales del producto (Ingresos y edición desde Stock).
+const VISUAL_PRESENTATION_OPTIONS = [
+  ['horma_redonda', 'Horma redonda'],
+  ['horma_rectangular', 'Horma rectangular'],
+  ['barra', 'Barra'],
+  ['embutido_entero', 'Embutido entero'],
+  ['jamon_entero', 'Jamón entero'],
+  ['botella', 'Botella'],
+  ['paquete', 'Paquete'],
+  ['unidad', 'Unidad / pieza'],
+  ['otro', 'Otro']
+];
+
 export default function App() {
   const loadBranchAdminProducts = async () => {
     if (!branchId) return;
@@ -132,6 +145,7 @@ export default function App() {
   // Administración de catálogo por sucursal
   const [branchAdminProducts, setBranchAdminProducts] = useState([]);
   const [branchAdminSearch, setBranchAdminSearch] = useState('');
+  const [stockEditForm, setStockEditForm] = useState(null); // edición de datos del producto desde Stock
   const [branchPriceDrafts, setBranchPriceDrafts] = useState({});
   const [branchMinStockDrafts, setBranchMinStockDrafts] = useState({});
 
@@ -162,7 +176,6 @@ export default function App() {
   const [latestStockAudit, setLatestStockAudit] = useState(null);
 
   // Ingreso / Edición de Producto
-  const [editingProductId, setEditingProductId] = useState(null);
   const [prodName, setProdName] = useState('');
   const [prodCategory, setProdCategory] = useState('');
   const [prodCost, setProdCost] = useState('');
@@ -172,7 +185,6 @@ export default function App() {
   const [prodUnitType, setProdUnitType] = useState('unid');
   const [prodBarcode, setProdBarcode] = useState('');
   const [prodExpirationDate, setProdExpirationDate] = useState('');
-  const [prodIsActive, setProdIsActive] = useState(true);
   const [ingressProductId, setIngressProductId] = useState(null);
   const [prodBrand, setProdBrand] = useState('');
   const [prodLotNumber, setProdLotNumber] = useState('');
@@ -782,7 +794,16 @@ export default function App() {
         if (master && master.id === productId) raw = master;
       } catch (e) { raw = null; }
     }
-    const current = raw || products.find(p => p.id === productId) || null;
+    let current = raw || products.find(p => p.id === productId) || null;
+    if (!current) {
+      // Sin EAN y no habilitado en esta sucursal: se buscan los datos en la otra sucursal.
+      for (const otherBranch of [1, 2].filter(b => b !== (branchId || 1))) {
+        try {
+          current = (await fetchProducts(otherBranch)).find(p => p.id === productId) || null;
+        } catch (e) { current = null; }
+        if (current) break;
+      }
+    }
     if (!current) throw new Error('No se pudieron leer los datos actuales del producto (proveedor y vencimiento).');
     const basePrice = Number(adminRow.base_price);
     if (!Number.isFinite(basePrice)) throw new Error('El producto no tiene un precio base válido.');
@@ -1666,57 +1687,48 @@ export default function App() {
     } catch(e) { alert('Error: '+e.message); } finally { setLoading(false); }
   };
 
-  const handleStartEditProduct = (prod) => {
+  // Edición de DATOS del producto desde Stock (nombre, marca, categoría, EAN, presentación).
+  // No edita precios: el precio de la sucursal se guarda con "Precio en sucursal" (configureBranchProduct)
+  // y el precio base/global no se toca. Tampoco toca stock, lotes ni costos.
+  const handleStartEditProduct = (item) => {
     if (!canEditRecords && !isAdminLevel) return alert('⚠️ No tenés permiso para editar registros.');
-    setEditingProductId(prod.id);
-    setProdName(prod.name);
-    setProdCategory(prod.category || 'Varios');
-    setProdCost(prod.cost_price ? String(prod.cost_price) : '0');
-    setProdPrice(String(prod.price_per_unit));
-    setProdSupplier(prod.supplier || '');
-    setProdStock(String(prod.stock));
-    setProdUnitType(prod.unit_type || 'unid');
-    setProdBarcode(prod.barcode || '');
-    setProdVisualPresentation(prod.visual_presentation || 'unidad');
-    setProdIsActive(prod.is_active);
-    setProdExpirationDate('');
+    setStockEditForm({
+      product_id: item.product_id,
+      name: item.name || '',
+      brand: item.brand || '',
+      category: item.category || '',
+      barcode: item.barcode || '',
+      visual_presentation: item.visual_presentation || null,
+      base_price: item.base_price,
+    });
   };
 
-  const handleCancelEditProduct = () => {
-    setEditingProductId(null);
-    setProdName(''); setProdCost(''); setProdPrice(''); setProdSupplier(''); setProdStock(''); setProdBarcode(''); setProdExpirationDate(''); setProdUnitType('unid'); setProdVisualPresentation('unidad'); setProdIsActive(true);
-  };
+  const handleCancelEditProduct = () => setStockEditForm(null);
 
   const handleSaveProduct = async () => {
-    if (!prodName || !prodPrice || !prodStock) return alert('Completá nombre, precio PVP y stock');
+    const f = stockEditForm;
+    if (!f) return;
+    if (!f.name.trim()) return alert('El nombre es obligatorio.');
+    if (!f.category.trim()) return alert('La categoría es obligatoria.');
     try {
       setLoading(true);
-      const payload = {
-        name: prodName,
-        category: prodCategory,
-        cost_price: parseFloat((prodCost || '0').replace(',', '.')),
-        price_per_unit: parseFloat(prodPrice.replace(',', '.')),
-        supplier: prodSupplier || null,
-        unit_type: prodUnitType,
-        stock: parseFloat(prodStock.replace(',', '.')),
-        barcode: prodBarcode || null,
-        visual_presentation: prodVisualPresentation,
-        is_active: prodIsActive,
-        expiration_date: prodExpirationDate || null
-      };
-
-      if (editingProductId) {
-        await updateProduct(editingProductId, payload);
-        alert('✅ Producto actualizado');
-      } else {
-        await createProduct(payload);
-        alert('✅ Producto/Lote guardado');
-      }
-
-      handleCancelEditProduct();
-      await loadInitialData();
-    } catch (e) { alert('Error guardando producto'); }
-    finally { setLoading(false); }
+      await updateProduct(f.product_id, await buildFullProductUpdate(f.product_id, {
+        name: f.name.trim(),
+        brand: f.brand.trim() || null,
+        category: f.category.trim(),
+        barcode: f.barcode.trim() || null,
+        visual_presentation: f.visual_presentation,
+        notes: 'Edición de datos desde Stock'
+      }));
+      alert('✅ Datos del producto actualizados');
+      setStockEditForm(null);
+      await loadBranchAdminProducts();
+      setProducts(await fetchProducts(branchId || 1));
+    } catch (e) {
+      alert('Error: ' + (e.message || 'No se pudo guardar el producto'));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCreateUser = async () => {
@@ -3229,7 +3241,7 @@ return (
                       return (
                         <View key={item.product_id} style={{ padding: 10, backgroundColor: '#f8f9fa', borderRadius: 8, marginBottom: 10, borderWidth: 1, borderColor: '#dee2e6' }}>
                           <Text style={{ fontWeight: 'bold', fontSize: 14, color: '#222' }}>{item.name}</Text>
-                          <Text style={{ fontSize: 11, color: '#555', marginBottom: 6 }}>Base: {formatMoney(item.base_price)} · Stock actual: {item.stock} {unitLabel}</Text>
+                          <Text style={{ fontSize: 11, color: '#555', marginBottom: 6 }}>Precio base (global): {formatMoney(item.base_price)} · Stock actual: {item.stock} {unitLabel}</Text>
 
                           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
                             <View style={{ flex: 1, marginRight: 6 }}>
@@ -3263,6 +3275,46 @@ return (
                               <Text style={styles.buttonText}>Retirar de sucursal</Text>
                             </TouchableOpacity>
                           </View>
+
+                          {(canEditRecords || isAdminLevel) && stockEditForm?.product_id !== item.product_id && (
+                            <TouchableOpacity style={{ marginTop: 8, paddingVertical: 8, alignItems: 'center', borderRadius: 6, borderWidth: 1, borderColor: '#6c757d' }} onPress={() => handleStartEditProduct(item)} disabled={loading}>
+                              <Text style={{ color: '#495057', fontWeight: 'bold', fontSize: 12 }}>✏️ Datos del producto</Text>
+                            </TouchableOpacity>
+                          )}
+
+                          {stockEditForm?.product_id === item.product_id && (
+                            <View style={{ marginTop: 10, padding: 10, backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#6c757d' }}>
+                              <Text style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 6 }}>✏️ Datos del producto (todas las sucursales)</Text>
+                              <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#444' }}>Nombre</Text>
+                              <TextInput style={styles.input} value={stockEditForm.name} onChangeText={(v) => setStockEditForm({ ...stockEditForm, name: v })} />
+                              <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#444' }}>Marca</Text>
+                              <TextInput style={styles.input} value={stockEditForm.brand} placeholder="Sin marca" onChangeText={(v) => setStockEditForm({ ...stockEditForm, brand: v })} />
+                              <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#444' }}>Categoría</Text>
+                              <TextInput style={styles.input} value={stockEditForm.category} onChangeText={(v) => setStockEditForm({ ...stockEditForm, category: v })} />
+                              <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#444' }}>EAN</Text>
+                              <TextInput style={styles.input} value={stockEditForm.barcode} placeholder="Sin EAN" keyboardType="numeric" onChangeText={(v) => setStockEditForm({ ...stockEditForm, barcode: v })} />
+                              <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#444', marginBottom: 4 }}>Presentación visual</Text>
+                              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+                                {VISUAL_PRESENTATION_OPTIONS.map(([vKey, vLabel]) => (
+                                  <TouchableOpacity key={vKey} style={[styles.typeBtn, { marginRight: 6, paddingHorizontal: 10 }, stockEditForm.visual_presentation === vKey && { backgroundColor: '#007bff' }]}
+                                    onPress={() => setStockEditForm({ ...stockEditForm, visual_presentation: vKey })}>
+                                    <Text style={{ fontSize: 11, color: stockEditForm.visual_presentation === vKey ? '#fff' : '#333', fontWeight: 'bold' }}>{vLabel}</Text>
+                                  </TouchableOpacity>
+                                ))}
+                              </ScrollView>
+                              <Text style={{ fontSize: 10, color: '#666', fontStyle: 'italic', marginBottom: 8 }}>
+                                Los precios no se editan acá. Precio base (global): {formatMoney(stockEditForm.base_price)}. El precio de {branchName} se guarda en "Precio en sucursal". Unidad, vencimiento, proveedor, política MRP, stock, lotes y costos se conservan.
+                              </Text>
+                              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                                <TouchableOpacity style={[styles.buttonPrimary, { flex: 0.48, marginTop: 0 }]} onPress={handleSaveProduct} disabled={loading}>
+                                  <Text style={styles.buttonText}>💾 Guardar datos</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity style={[styles.buttonPrimary, { flex: 0.48, marginTop: 0, backgroundColor: '#6c757d' }]} onPress={handleCancelEditProduct} disabled={loading}>
+                                  <Text style={styles.buttonText}>Cancelar</Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          )}
                         </View>
                       );
                     })
@@ -3437,17 +3489,7 @@ return (
                   
                   <Text style={{fontWeight:'bold',marginTop:8,marginBottom:4}}>Presentación para carteles</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:10}}>
-                    {[
-                      ['horma_redonda', 'Horma redonda'],
-                      ['horma_rectangular', 'Horma rectangular'],
-                      ['barra', 'Barra'],
-                      ['embutido_entero', 'Embutido entero'],
-                      ['jamon_entero', 'Jamón entero'],
-                      ['botella', 'Botella'],
-                      ['paquete', 'Paquete'],
-                      ['unidad', 'Unidad / pieza'],
-                      ['otro', 'Otro']
-                    ].map(([vKey, vLabel]) => (
+                    {VISUAL_PRESENTATION_OPTIONS.map(([vKey, vLabel]) => (
                       <TouchableOpacity
                         key={vKey}
                         style={[styles.typeBtn, { marginRight: 6, paddingHorizontal: 10 }, prodVisualPresentation === vKey && { backgroundColor: '#007bff' }]}
