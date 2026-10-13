@@ -6,7 +6,21 @@ import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import * as XLSX from 'xlsx';
 import FairDayPlanner from './FairDayPlanner';
+import PosterMaker from './PosterMaker';
 import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProfitability, fetchMasterProductByBarcode, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, updateIngress, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled, actOnAlert, fetchAlertHistory, updateReplenishmentPolicy, fetchBranchProductsAdmin, configureBranchProduct, removeBranchProduct, fetchLatestProductAudit, fetchSalesHistory, fetchSaleDetail, fetchPromotions, fetchPromotionDetail, createPromotion, updatePromotion, deletePromotion, calculatePromotion, fetchIngressHistory } from './api';
+
+// Presentaciones visuales del producto (Ingresos y edición desde Stock).
+const VISUAL_PRESENTATION_OPTIONS = [
+  ['horma_redonda', 'Horma redonda'],
+  ['horma_rectangular', 'Horma rectangular'],
+  ['barra', 'Barra'],
+  ['embutido_entero', 'Embutido entero'],
+  ['jamon_entero', 'Jamón entero'],
+  ['botella', 'Botella'],
+  ['paquete', 'Paquete'],
+  ['unidad', 'Unidad / pieza'],
+  ['otro', 'Otro']
+];
 
 export default function App() {
   const loadBranchAdminProducts = async () => {
@@ -131,6 +145,7 @@ export default function App() {
   // Administración de catálogo por sucursal
   const [branchAdminProducts, setBranchAdminProducts] = useState([]);
   const [branchAdminSearch, setBranchAdminSearch] = useState('');
+  const [stockEditForm, setStockEditForm] = useState(null); // edición de datos del producto desde Stock
   const [branchPriceDrafts, setBranchPriceDrafts] = useState({});
   const [branchMinStockDrafts, setBranchMinStockDrafts] = useState({});
 
@@ -141,15 +156,6 @@ export default function App() {
   const [stockListCategory, setStockListCategory] = useState('todas');
 
   // Estados para Cartelería
-  const [posterMode, setPosterMode] = useState('producto'); // 'producto' | 'promocion'
-  const [posterProductSearch, setPosterProductSearch] = useState('');
-  const [selectedPosterProduct, setSelectedPosterProduct] = useState(null);
-  const [selectedPosterPromo, setSelectedPosterPromo] = useState(null);
-  const [posterBadge, setPosterBadge] = useState('SIN_ETIQUETA');
-  const [posterFormat, setPosterFormat] = useState('A4_VERTICAL');
-  const [posterShowSavings, setPosterShowSavings] = useState(true);
-  const [posterKgFraction, setPosterKgFraction] = useState('1/4'); // '1/4' | '1/2' | '1' | 'custom'
-  const [posterCustomKg, setPosterCustomKg] = useState('');
 
 
   // Login
@@ -170,7 +176,6 @@ export default function App() {
   const [latestStockAudit, setLatestStockAudit] = useState(null);
 
   // Ingreso / Edición de Producto
-  const [editingProductId, setEditingProductId] = useState(null);
   const [prodName, setProdName] = useState('');
   const [prodCategory, setProdCategory] = useState('');
   const [prodCost, setProdCost] = useState('');
@@ -180,7 +185,6 @@ export default function App() {
   const [prodUnitType, setProdUnitType] = useState('unid');
   const [prodBarcode, setProdBarcode] = useState('');
   const [prodExpirationDate, setProdExpirationDate] = useState('');
-  const [prodIsActive, setProdIsActive] = useState(true);
   const [ingressProductId, setIngressProductId] = useState(null);
   const [prodBrand, setProdBrand] = useState('');
   const [prodLotNumber, setProdLotNumber] = useState('');
@@ -551,10 +555,6 @@ export default function App() {
     setIngressHistory([]);
     setShowIngressHistory(false);
     setEditingIngress(null);
-    setSelectedPosterProduct(null);
-    setSelectedPosterPromo(null);
-    setPosterKgFraction('1/4');
-    setPosterCustomKg('');
   };
 
   const changeBranch = () => {
@@ -779,6 +779,53 @@ export default function App() {
     }
   };
 
+  // PUT /products/{id} reemplaza el producto completo (name y price_per_unit son obligatorios y los
+  // campos omitidos vuelven a sus valores por defecto). Este helper arma el payload con TODOS los
+  // datos actuales: el precio es el GLOBAL (base_price), nunca el de la sucursal, y se conservan
+  // proveedor, vencimiento, política MRP, presentación e imagen. No toca stock, lotes ni costos.
+  const buildFullProductUpdate = async (productId, changes) => {
+    const adminList = await fetchBranchProductsAdmin(branchId || 1);
+    const adminRow = (adminList || []).find(x => x.product_id === productId);
+    if (!adminRow) throw new Error('No se pudieron leer los datos actuales del producto.');
+    let raw = null;
+    if (adminRow.barcode) {
+      try {
+        const master = await fetchMasterProductByBarcode(adminRow.barcode);
+        if (master && master.id === productId) raw = master;
+      } catch (e) { raw = null; }
+    }
+    let current = raw || products.find(p => p.id === productId) || null;
+    if (!current) {
+      // Sin EAN y no habilitado en esta sucursal: se buscan los datos en la otra sucursal.
+      for (const otherBranch of [1, 2].filter(b => b !== (branchId || 1))) {
+        try {
+          current = (await fetchProducts(otherBranch)).find(p => p.id === productId) || null;
+        } catch (e) { current = null; }
+        if (current) break;
+      }
+    }
+    if (!current) throw new Error('No se pudieron leer los datos actuales del producto (proveedor y vencimiento).');
+    const basePrice = Number(adminRow.base_price);
+    if (!Number.isFinite(basePrice)) throw new Error('El producto no tiene un precio base válido.');
+    const definedChanges = Object.fromEntries(Object.entries(changes || {}).filter(([, v]) => v !== undefined));
+    return {
+      name: adminRow.name,
+      category: adminRow.category,
+      brand: adminRow.brand ?? null,
+      barcode: adminRow.barcode ?? null,
+      price_per_unit: basePrice,
+      supplier: current.supplier ?? null,
+      unit_type: adminRow.unit_type,
+      requires_expiration: current.requires_expiration ?? null,
+      replenishment_policy: current.replenishment_policy ?? null,
+      visual_presentation: adminRow.visual_presentation ?? null,
+      product_image_uri: adminRow.product_image_uri ?? null,
+      is_active: current.is_active ?? true,
+      received_by: email || 'Anonimo',
+      ...definedChanges,
+    };
+  };
+
   const saveIngressCorrection = async () => {
     if (!editingIngress) return;
     if (!editIngressReason.trim()) return alert("El motivo de la corrección es obligatorio.");
@@ -810,14 +857,15 @@ export default function App() {
 
       // 1. Actualizar datos maestros del producto si cambiaron
       if (productId) {
-        await updateProduct(productId, {
+        await updateProduct(productId, await buildFullProductUpdate(productId, {
           name: editProdName.trim() || undefined,
           brand: editProdBrand.trim() || null,
           category: editProdCategory.trim() || undefined,
           barcode: editProdBarcode.trim() || null,
           unit_type: editProdUnitType,
-          requires_expiration: editProdRequiresExpiration
-        });
+          requires_expiration: editProdRequiresExpiration,
+          notes: `Corrección de ingreso: ${editIngressReason.trim()}`
+        }));
       }
 
       // 2. Actualizar precio de venta de la sucursal actual preservando is_available, is_exclusive, minimum_stock
@@ -892,13 +940,23 @@ export default function App() {
           is_active:true
         }, branchId || 1);
         productId=created.id;
-      } else {
-        await updateProduct(productId, {
-          visual_presentation: prodVisualPresentation
-        });
       }
+      const isExistingProduct = !!ingressProductId;
       await createIngress({product_id:productId,supplier:prodSupplier||null,cost_price:cost,quantity:qty,lot_number:prodLotNumber||null,expiration_date:expirationIso,received_by:email,notes:'Ingreso desde App V2'}, branchId || 1);
-      alert('Ingreso y lote registrados correctamente'); resetIngressForm(); await loadInitialData();
+      // La presentación visual es solo un dato de cartelería: se actualiza después del ingreso y
+      // si falla no afecta el ingreso ya registrado.
+      let visualWarning = '';
+      if (isExistingProduct) {
+        try {
+          const currentData = await buildFullProductUpdate(productId, {});
+          if ((currentData.visual_presentation || null) !== prodVisualPresentation) {
+            await updateProduct(productId, { ...currentData, visual_presentation: prodVisualPresentation, notes: 'Presentación visual desde Ingresos' });
+          }
+        } catch (eVisual) {
+          visualWarning = `\n⚠️ No se pudo actualizar la presentación visual: ${eVisual.message}`;
+        }
+      }
+      alert('Ingreso y lote registrados correctamente' + visualWarning); resetIngressForm(); await loadInitialData();
     } catch(e) { alert('Error: '+e.message); } finally { setLoading(false); }
   };
 
@@ -1629,57 +1687,48 @@ export default function App() {
     } catch(e) { alert('Error: '+e.message); } finally { setLoading(false); }
   };
 
-  const handleStartEditProduct = (prod) => {
+  // Edición de DATOS del producto desde Stock (nombre, marca, categoría, EAN, presentación).
+  // No edita precios: el precio de la sucursal se guarda con "Precio en sucursal" (configureBranchProduct)
+  // y el precio base/global no se toca. Tampoco toca stock, lotes ni costos.
+  const handleStartEditProduct = (item) => {
     if (!canEditRecords && !isAdminLevel) return alert('⚠️ No tenés permiso para editar registros.');
-    setEditingProductId(prod.id);
-    setProdName(prod.name);
-    setProdCategory(prod.category || 'Varios');
-    setProdCost(prod.cost_price ? String(prod.cost_price) : '0');
-    setProdPrice(String(prod.price_per_unit));
-    setProdSupplier(prod.supplier || '');
-    setProdStock(String(prod.stock));
-    setProdUnitType(prod.unit_type || 'unid');
-    setProdBarcode(prod.barcode || '');
-    setProdVisualPresentation(prod.visual_presentation || 'unidad');
-    setProdIsActive(prod.is_active);
-    setProdExpirationDate('');
+    setStockEditForm({
+      product_id: item.product_id,
+      name: item.name || '',
+      brand: item.brand || '',
+      category: item.category || '',
+      barcode: item.barcode || '',
+      visual_presentation: item.visual_presentation || null,
+      base_price: item.base_price,
+    });
   };
 
-  const handleCancelEditProduct = () => {
-    setEditingProductId(null);
-    setProdName(''); setProdCost(''); setProdPrice(''); setProdSupplier(''); setProdStock(''); setProdBarcode(''); setProdExpirationDate(''); setProdUnitType('unid'); setProdVisualPresentation('unidad'); setProdIsActive(true);
-  };
+  const handleCancelEditProduct = () => setStockEditForm(null);
 
   const handleSaveProduct = async () => {
-    if (!prodName || !prodPrice || !prodStock) return alert('Completá nombre, precio PVP y stock');
+    const f = stockEditForm;
+    if (!f) return;
+    if (!f.name.trim()) return alert('El nombre es obligatorio.');
+    if (!f.category.trim()) return alert('La categoría es obligatoria.');
     try {
       setLoading(true);
-      const payload = {
-        name: prodName,
-        category: prodCategory,
-        cost_price: parseFloat((prodCost || '0').replace(',', '.')),
-        price_per_unit: parseFloat(prodPrice.replace(',', '.')),
-        supplier: prodSupplier || null,
-        unit_type: prodUnitType,
-        stock: parseFloat(prodStock.replace(',', '.')),
-        barcode: prodBarcode || null,
-        visual_presentation: prodVisualPresentation,
-        is_active: prodIsActive,
-        expiration_date: prodExpirationDate || null
-      };
-
-      if (editingProductId) {
-        await updateProduct(editingProductId, payload);
-        alert('✅ Producto actualizado');
-      } else {
-        await createProduct(payload);
-        alert('✅ Producto/Lote guardado');
-      }
-
-      handleCancelEditProduct();
-      await loadInitialData();
-    } catch (e) { alert('Error guardando producto'); }
-    finally { setLoading(false); }
+      await updateProduct(f.product_id, await buildFullProductUpdate(f.product_id, {
+        name: f.name.trim(),
+        brand: f.brand.trim() || null,
+        category: f.category.trim(),
+        barcode: f.barcode.trim() || null,
+        visual_presentation: f.visual_presentation,
+        notes: 'Edición de datos desde Stock'
+      }));
+      alert('✅ Datos del producto actualizados');
+      setStockEditForm(null);
+      await loadBranchAdminProducts();
+      setProducts(await fetchProducts(branchId || 1));
+    } catch (e) {
+      alert('Error: ' + (e.message || 'No se pudo guardar el producto'));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCreateUser = async () => {
@@ -2242,314 +2291,6 @@ export default function App() {
     }
   };
 
-  // Funciones de Cartelería
-  const renderVisualGraphicPreview = (visualType) => {
-    let st = { width: 70, height: 70, backgroundColor: '#e0e0e0', borderWidth: 3, borderColor: '#000' };
-    switch (visualType) {
-      case 'horma_redonda':
-        st = { width: 80, height: 80, borderRadius: 40, backgroundColor: '#ffb300', borderWidth: 3, borderColor: '#000' };
-        break;
-      case 'horma_rectangular':
-        st = { width: 90, height: 60, borderRadius: 4, backgroundColor: '#ff8f00', borderWidth: 3, borderColor: '#000' };
-        break;
-      case 'barra':
-        st = { width: 110, height: 40, borderRadius: 20, backgroundColor: '#d32f2f', borderWidth: 3, borderColor: '#000' };
-        break;
-      case 'embutido_entero':
-        st = { width: 110, height: 40, borderRadius: 20, backgroundColor: '#d32f2f', borderWidth: 3, borderColor: '#000' };
-        break;
-      case 'jamon_entero':
-        st = { width: 90, height: 50, borderRadius: 25, backgroundColor: '#d32f2f', borderWidth: 3, borderColor: '#000' };
-        break;
-      case 'botella':
-        st = { width: 35, height: 100, borderRadius: 6, backgroundColor: '#388e3c', borderWidth: 3, borderColor: '#000' };
-        break;
-      case 'paquete':
-        st = { width: 80, height: 70, borderRadius: 6, backgroundColor: '#1976d2', borderWidth: 3, borderColor: '#000' };
-        break;
-      case 'unidad':
-      case 'otro':
-      default:
-        st = { width: 70, height: 70, borderRadius: 35, backgroundColor: '#e0e0e0', borderWidth: 3, borderColor: '#000' };
-        break;
-    }
-    return <View style={{ margin: 10, alignItems: 'center', justifyContent: 'center' }}><View style={st} /></View>;
-  };
-
-  const renderVisualGraphicHtml = (visualType, imageUri) => {
-    if (imageUri) {
-      return `<div class="visual-img-container"><img src="${imageUri}" class="visual-img" /></div>`;
-    }
-    let shapeClass = 'visual-unit';
-    let label = 'UNIDAD';
-    switch(visualType) {
-      case 'horma_redonda':
-        shapeClass = 'visual-circle';
-        label = 'HORMA REDONDA';
-        break;
-      case 'horma_rectangular':
-        shapeClass = 'visual-block';
-        label = 'HORMA RECTANGULAR';
-        break;
-      case 'barra':
-        shapeClass = 'visual-bar';
-        label = 'BARRA';
-        break;
-      case 'embutido_entero':
-        shapeClass = 'visual-bar';
-        label = 'EMBUTIDO ENTERO';
-        break;
-      case 'jamon_entero':
-        shapeClass = 'visual-bar';
-        label = 'JAMÓN ENTERO';
-        break;
-      case 'botella':
-        shapeClass = 'visual-bottle';
-        label = 'BOTELLA';
-        break;
-      case 'paquete':
-        shapeClass = 'visual-packet';
-        label = 'PAQUETE';
-        break;
-      case 'unidad':
-        shapeClass = 'visual-unit';
-        label = 'PIEZA / UNIDAD';
-        break;
-      default:
-        shapeClass = 'visual-unit';
-        label = 'PIEZA / UNIDAD';
-        break;
-    }
-    return `<div class="graphic-container"><div class="${shapeClass}"></div></div>`;
-  };
-
-  const getPosterCommercialData = () => {
-    if (!selectedPosterProduct) return { priceDisplay: '$0.00', unitDisplay: 'UNID', subtitleDisplay: null };
-    const prod = selectedPosterProduct;
-    const basePrice = Number(prod.branch_price ?? prod.price_per_unit ?? 0);
-    const unitType = prod.unit_type;
-
-    if (unitType === 'kg') {
-      let factor = 0.25;
-      let fractionLabel = '1/4 KG';
-      if (posterKgFraction === '1/2') {
-        factor = 0.5;
-        fractionLabel = '1/2 KG';
-      } else if (posterKgFraction === '1') {
-        factor = 1.0;
-        fractionLabel = '1 KG';
-      } else if (posterKgFraction === 'custom') {
-        const cleanCustom = posterCustomKg.replace(',', '.');
-        const parsedCustom = parseFloat(cleanCustom);
-        if (Number.isFinite(parsedCustom) && parsedCustom > 0) {
-          factor = parsedCustom;
-          if (parsedCustom === 0.25) fractionLabel = '1/4 KG';
-          else if (parsedCustom === 0.5) fractionLabel = '1/2 KG';
-          else if (parsedCustom === 1.0) fractionLabel = '1 KG';
-          else if (parsedCustom === 0.3) fractionLabel = '300 G';
-          else if (parsedCustom === 0.75) fractionLabel = '750 G';
-          else if (parsedCustom > 1) {
-            fractionLabel = `${parsedCustom.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 3 })} KG`;
-          } else {
-            fractionLabel = `${Math.round(parsedCustom * 1000)} G`;
-          }
-        }
-      }
-
-      const calculatedPrice = basePrice * factor;
-      const formattedPrice = formatMoney(calculatedPrice);
-      const subPrice = `${formatMoney(basePrice)}/kg`;
-
-      return {
-        priceDisplay: formattedPrice,
-        unitDisplay: fractionLabel,
-        subtitleDisplay: subPrice
-      };
-    } else {
-      return {
-        priceDisplay: formatMoney(basePrice),
-        unitDisplay: 'UNIDAD',
-        subtitleDisplay: null
-      };
-    }
-  };
-
-  const generatePosterHtmlContent = () => {
-    let badgeText = '';
-    if (posterBadge === 'NUEVO') badgeText = '🔥 NUEVO 🔥';
-    else if (posterBadge === 'RECOMENDADO') badgeText = '⭐ RECOMENDADO ⭐';
-    else if (posterBadge === 'IDEAL PARA PICADAS') badgeText = '🧀 IDEAL PARA PICADAS 🍷';
-    else if (posterBadge === 'IMPERDIBLE') badgeText = '🔥 IMPERDIBLE 🔥';
-    else if (posterBadge === 'OFERTA') badgeText = '💥 OFERTA 💥';
-
-    const badgeHtml = badgeText ? `<div class="badge">${badgeText}</div>` : '';
-
-    let contentInner = '';
-
-    if (posterMode === 'producto') {
-      if (!selectedPosterProduct) return '<div class="empty-poster">Seleccioná un producto para generar el cartel</div>';
-      const prod = selectedPosterProduct;
-      const name = prod.name || 'PRODUCTO';
-      const brand = prod.brand ? `<div class="brand">${prod.brand}</div>` : '';
-      const visualType = prod.visual_presentation || 'unidad';
-      const imgUri = prod.product_image_uri || null;
-      const visualHtml = renderVisualGraphicHtml(visualType, imgUri);
-
-      const commercial = getPosterCommercialData();
-      const subPriceHtml = commercial.subtitleDisplay ? `<div class="sub-price">${commercial.subtitleDisplay}</div>` : '';
-
-      contentInner = `
-        ${badgeHtml}
-        <div class="product-name">${name}</div>
-        ${brand}
-        ${visualHtml}
-        <div class="price-box">
-          <span class="price">${commercial.priceDisplay}</span>
-          <span class="unit">${commercial.unitDisplay}</span>
-        </div>
-        ${subPriceHtml}
-      `;
-    } else {
-      if (!selectedPosterPromo) return '<div class="empty-poster">Seleccioná una promoción para generar el cartel</div>';
-      const promo = selectedPosterPromo;
-      const name = promo.name || 'PROMOCIÓN';
-      const desc = promo.description ? `<div class="promo-desc">${promo.description}</div>` : '';
-      const promoPrice = formatMoney(promo.promo_price ?? 0);
-
-      let normalTotal = 0;
-      const itemsHtml = (promo.items || []).map(item => {
-        const qtyF = formatQuantityVisual(item.included_qty, item.unit_type);
-        const compPrice = Number(item.regular_unit_price || item.price_per_unit || 0);
-        normalTotal += Number(item.included_qty || 0) * compPrice;
-        return `<div class="promo-item">• ${qtyF} ${item.product_name || item.name || 'Componente'}</div>`;
-      }).join('');
-
-      let savingsHtml = '';
-      if (posterShowSavings && normalTotal > (promo.promo_price ?? 0)) {
-        const ahorro = normalTotal - (promo.promo_price ?? 0);
-        savingsHtml = `
-          <div class="savings-box">
-            <div class="normal-price">Antes: ${formatMoney(normalTotal)}</div>
-            <div class="now-price">Ahora: ${promoPrice}</div>
-            <div class="saved-amount">¡Ahorrás: ${formatMoney(ahorro)}!</div>
-          </div>
-        `;
-      } else {
-        savingsHtml = `
-          <div class="price-box">
-            <span class="price">${promoPrice}</span>
-          </div>
-        `;
-      }
-
-      contentInner = `
-        ${badgeHtml}
-        <div class="product-name">${name}</div>
-        ${desc}
-        <div class="promo-items-container">
-          ${itemsHtml}
-        </div>
-        ${savingsHtml}
-      `;
-    }
-
-    let repeatCount = 1;
-    if (posterFormat === 'A4_2_POR_HOJA') repeatCount = 2;
-    else if (posterFormat === 'A4_4_POR_HOJA') repeatCount = 4;
-
-    const isHorizontal = posterFormat === 'A4_HORIZONTAL';
-    const containerGridClass = repeatCount === 4 ? 'grid-4' : repeatCount === 2 ? 'grid-2' : 'grid-1';
-
-    let postersHtml = '';
-    for (let i = 0; i < repeatCount; i++) {
-      postersHtml += `<div class="poster-card ${containerGridClass}">${contentInner}</div>`;
-    }
-
-    return `
-      <html>
-        <head>
-          <meta charset="utf-8">
-          <style>
-            @page { size: A4 ${isHorizontal ? 'landscape' : 'portrait'}; margin: 10mm; }
-            body { font-family: 'Arial Black', Arial, sans-serif; margin: 0; padding: 0; background: #fff; color: #000; }
-            .sheet { display: flex; flex-direction: ${repeatCount === 2 && !isHorizontal ? 'column' : 'row'}; flex-wrap: wrap; width: 100%; height: 100%; box-sizing: border-box; justify-content: space-around; align-content: space-around; }
-            .poster-card { border: 6px solid #000; background: #fffde7; padding: 15px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; position: relative; }
-            
-            .grid-1 { width: 100%; height: 100%; min-height: 250mm; }
-            .grid-2 { width: ${isHorizontal ? '48%' : '100%'}; height: ${isHorizontal ? '95%' : '125mm'}; }
-            .grid-4 { width: 48%; height: 125mm; }
-
-            .badge { background: #d32f2f; color: #fff; font-size: ${repeatCount === 4 ? '14px' : '20px'}; font-weight: bold; padding: 6px 16px; border-radius: 6px; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 1px; border: 2px solid #000; }
-            .product-name { font-size: ${repeatCount === 4 ? '20px' : repeatCount === 2 ? '26px' : '36px'}; font-weight: 900; color: #000; margin-bottom: 6px; text-transform: uppercase; line-height: 1.1; }
-            .brand { font-size: ${repeatCount === 4 ? '12px' : '16px'}; color: #555; font-weight: bold; margin-bottom: 6px; text-transform: uppercase; }
-            .promo-desc { font-size: 12px; color: #444; margin-bottom: 8px; font-style: italic; }
-            
-            .graphic-container { margin: 10px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-            .visual-circle { width: ${repeatCount === 4 ? '60px' : '90px'}; height: ${repeatCount === 4 ? '60px' : '90px'}; border-radius: 50%; background: #ffb300; border: 4px solid #000; box-shadow: inset -6px -6px 0px rgba(0,0,0,0.15); }
-            .visual-block { width: ${repeatCount === 4 ? '80px' : '110px'}; height: ${repeatCount === 4 ? '50px' : '70px'}; background: #ff8f00; border: 4px solid #000; border-radius: 4px; }
-            .visual-bar { width: ${repeatCount === 4 ? '100px' : '140px'}; height: ${repeatCount === 4 ? '35px' : '50px'}; background: #d32f2f; border: 4px solid #000; border-radius: 20px; }
-            .visual-bottle { width: ${repeatCount === 4 ? '30px' : '45px'}; height: ${repeatCount === 4 ? '90px' : '130px'}; background: #388e3c; border: 4px solid #000; border-radius: 8px 8px 4px 4px; }
-            .visual-packet { width: ${repeatCount === 4 ? '70px' : '100px'}; height: ${repeatCount === 4 ? '60px' : '85px'}; background: #1976d2; border: 4px solid #000; border-radius: 6px; }
-            .visual-unit { width: ${repeatCount === 4 ? '60px' : '80px'}; height: ${repeatCount === 4 ? '60px' : '80px'}; background: #e0e0e0; border: 4px solid #000; border-radius: 50%; }
-            .visual-img-container { margin: 10px 0; max-height: 120px; }
-            .visual-img { max-height: 100px; max-width: 150px; object-fit: contain; border: 2px solid #000; }
-
-            .promo-items-container { margin: 8px 0; font-size: ${repeatCount === 4 ? '12px' : '16px'}; font-weight: bold; text-align: left; background: #fff; padding: 8px; border: 2px dashed #000; width: 85%; }
-            .promo-item { margin: 4px 0; color: #222; }
-
-            .price-box { background: #000; color: #ffeb3b; padding: 8px 20px; border-radius: 8px; margin-top: 10px; display: inline-block; border: 3px solid #d32f2f; }
-            .price { font-size: ${repeatCount === 4 ? '28px' : repeatCount === 2 ? '38px' : '52px'}; font-weight: 900; letter-spacing: -1px; }
-            .unit { font-size: ${repeatCount === 4 ? '14px' : '18px'}; font-weight: bold; margin-left: 4px; color: #fff; }
-            .sub-price { font-size: ${repeatCount === 4 ? '12px' : '15px'}; font-weight: bold; color: #333; margin-top: 6px; }
-
-            .savings-box { background: #000; color: #fff; padding: 8px 15px; border-radius: 8px; margin-top: 8px; border: 3px solid #28a745; width: 90%; }
-            .normal-price { font-size: ${repeatCount === 4 ? '12px' : '14px'}; text-decoration: line-through; color: #ff8a80; }
-            .now-price { font-size: ${repeatCount === 4 ? '22px' : '30px'}; color: #ffeb3b; font-weight: 900; }
-            .saved-amount { font-size: ${repeatCount === 4 ? '12px' : '15px'}; color: #81c784; font-weight: bold; margin-top: 2px; }
-          </style>
-        </head>
-        <body>
-          <div class="sheet">
-            ${postersHtml}
-          </div>
-        </body>
-      </html>
-    `;
-  };
-
-  const handleGeneratePosterPdf = async () => {
-    try {
-      setLoading(true);
-      const html = generatePosterHtmlContent();
-      const { uri } = await Print.printToFileAsync({ html });
-      const filename = `cartel_${Date.now()}.pdf`;
-      const newUri = FileSystem.documentDirectory + filename;
-      await FileSystem.moveAsync({ from: uri, to: newUri });
-
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(newUri, { mimeType: 'application/pdf', dialogTitle: 'Cartel Imprimible' });
-      } else {
-        alert('La función de compartir no está disponible en este dispositivo.');
-      }
-    } catch (e) {
-      alert('No se pudo generar el PDF del cartel');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handlePrintPoster = async () => {
-    try {
-      setLoading(true);
-      const html = generatePosterHtmlContent();
-      await Print.printAsync({ html });
-    } catch (e) {
-      alert('No se pudo imprimir el cartel');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   if (!isLoggedIn) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -2620,7 +2361,6 @@ export default function App() {
   const filteredProductsVendor = searchQueryVendor.trim() === '' ? [] : activeProducts.filter(p => p.name.toLowerCase().includes(searchQueryVendor.toLowerCase()));
   const filteredProductsCashier = searchQueryCashier.trim() === '' ? [] : activeProducts.filter(p => p.name.toLowerCase().includes(searchQueryCashier.toLowerCase()));
   const filteredProductsStock = searchQueryStock.trim() === '' ? [] : products.filter(p => p.name.toLowerCase().includes(searchQueryStock.toLowerCase()) || (p.barcode && p.barcode.includes(searchQueryStock)));
-  const filteredProductsPoster = posterProductSearch.trim() === '' ? [] : activeProducts.filter(p => p.name.toLowerCase().includes(posterProductSearch.toLowerCase()) || (p.barcode && p.barcode.includes(posterProductSearch)));
 return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
@@ -2947,245 +2687,16 @@ return (
           </ScrollView>
         )}
 
-        {/* CARTELERÍA */}
+        {/* 🏷️ CARTELERÍA V2 (PosterMaker.js) */}
         {currentTab === 'carteleria' && (canCarteleria || isAdminLevel) && (
-          <ScrollView contentContainerStyle={styles.scrollPadding} keyboardShouldPersistTaps="handled">
-            <Text style={styles.sectionTitle}>🪧 Cartelería Comercial</Text>
-            
-            {/* Selector de Modo: Producto / Promoción */}
-            <View style={{ flexDirection: 'row', marginBottom: 15, backgroundColor: '#e9ecef', borderRadius: 8, padding: 3 }}>
-              <TouchableOpacity 
-                style={[{ flex: 1, padding: 10, alignItems: 'center', borderRadius: 6 }, posterMode === 'producto' && { backgroundColor: '#d32f2f' }]}
-                onPress={() => { setPosterMode('producto'); setSelectedPosterPromo(null); }}
-              >
-                <Text style={{ fontWeight: 'bold', color: posterMode === 'producto' ? '#fff' : '#333' }}>📦 Producto</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[{ flex: 1, padding: 10, alignItems: 'center', borderRadius: 6 }, posterMode === 'promocion' && { backgroundColor: '#d32f2f' }]}
-                onPress={() => { setPosterMode('promocion'); setSelectedPosterProduct(null); loadPromotions(); }}
-              >
-                <Text style={{ fontWeight: 'bold', color: posterMode === 'promocion' ? '#fff' : '#333' }}>🎁 Promoción</Text>
-              </TouchableOpacity>
-            </View>
-
-            {posterMode === 'producto' ? (
-              <View style={styles.card}>
-                <Text style={styles.subSectionTitle}>1. Buscar Producto ({branchName})</Text>
-                <TextInput style={styles.searchInput} placeholder="Buscar producto por nombre o EAN" value={posterProductSearch} onChangeText={setPosterProductSearch} />
-                
-                {posterProductSearch.trim() !== '' && (
-                  <View style={styles.dropdownContainer}>
-                    {activeProducts.filter(p => p.name.toLowerCase().includes(posterProductSearch.toLowerCase()) || (p.barcode && p.barcode.includes(posterProductSearch))).length === 0 ? (
-                      <Text style={{ padding: 10, color: '#888' }}>Sin coincidencias en esta sucursal.</Text>
-                    ) : (
-                      activeProducts.filter(p => p.name.toLowerCase().includes(posterProductSearch.toLowerCase()) || (p.barcode && p.barcode.includes(posterProductSearch))).map(p => (
-                        <TouchableOpacity key={p.id} style={styles.dropdownItem} onPress={() => { setSelectedPosterProduct(p); setPosterProductSearch(''); }}>
-                          <Text style={{ fontWeight: 'bold' }}>{p.name}</Text>
-                          <Text style={{ color: '#28a745', fontSize: 12 }}>{formatMoney(p.branch_price ?? p.price_per_unit)} / {p.unit_type}</Text>
-                        </TouchableOpacity>
-                      ))
-                    )}
-                  </View>
-                )}
-
-                {selectedPosterProduct && (
-                  <View style={{ marginTop: 10, padding: 10, backgroundColor: '#e8f4f8', borderRadius: 6, borderWidth: 1, borderColor: '#b8daff' }}>
-                    <Text style={{ fontWeight: 'bold', fontSize: 14, color: '#004085' }}>✓ Seleccionado: {selectedPosterProduct.name}</Text>
-                    <Text style={{ fontSize: 12, color: '#333', marginTop: 2 }}>Precio actual: {formatMoney(selectedPosterProduct.branch_price ?? selectedPosterProduct.price_per_unit ?? 0)} / {selectedPosterProduct.unit_type}</Text>
-                    {selectedPosterProduct.brand ? <Text style={{ fontSize: 12, color: '#555' }}>Marca: {selectedPosterProduct.brand}</Text> : null}
-                    {selectedPosterProduct.barcode ? <Text style={{ fontSize: 12, color: '#555' }}>EAN: {selectedPosterProduct.barcode}</Text> : null}
-                    <Text style={{ fontSize: 12, color: '#555' }}>Presentación visual: {selectedPosterProduct.visual_presentation || 'unidad'}</Text>
-                  </View>
-                )}
-              </View>
-            ) : (
-              <View style={styles.card}>
-                <Text style={styles.subSectionTitle}>1. Seleccionar Promoción Activa ({branchName})</Text>
-                {promotions.filter(p => p.active === true && p.enabled === true).length === 0 ? (
-                  <Text style={styles.emptyText}>No hay promociones activas en esta sucursal.</Text>
-                ) : (
-                  promotions.filter(p => p.active === true && p.enabled === true).map(promo => (
-                    <TouchableOpacity 
-                      key={promo.id} 
-                      style={[styles.card, { borderWidth: selectedPosterPromo?.id === promo.id ? 2 : 1, borderColor: selectedPosterPromo?.id === promo.id ? '#d32f2f' : '#ccc', marginBottom: 8 }]} 
-                      onPress={() => setSelectedPosterPromo(promo)}
-                    >
-                      <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#6f42c1' }}>🎁 {promo.name}</Text>
-                      {promo.description ? <Text style={{ fontSize: 11, color: '#555' }}>{promo.description}</Text> : null}
-                      <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#28a745', marginTop: 4 }}>Precio promo: {formatMoney(promo.promo_price ?? 0)}</Text>
-                    </TouchableOpacity>
-                  ))
-                )}
-              </View>
-            )}
-
-            {/* Selector comercial si es producto por KG */}
-            {posterMode === 'producto' && selectedPosterProduct && selectedPosterProduct.unit_type === 'kg' && (
-              <View style={styles.card}>
-                <Text style={styles.subSectionTitle}>Precio por:</Text>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-                  {[
-                    ['1/4', '1/4 kg'],
-                    ['1/2', '1/2 kg'],
-                    ['1', '1 kg'],
-                    ['custom', 'Personalizado']
-                  ].map(([fKey, fLabel]) => (
-                    <TouchableOpacity 
-                      key={fKey} 
-                      style={[styles.typeBtn, { marginRight: 4, paddingHorizontal: 6 }, posterKgFraction === fKey && { backgroundColor: '#d32f2f', borderColor: '#b71c1c' }]} 
-                      onPress={() => setPosterKgFraction(fKey)}
-                    >
-                      <Text style={{ fontSize: 11, color: posterKgFraction === fKey ? '#fff' : '#333', fontWeight: 'bold' }}>{fLabel}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                {posterKgFraction === 'custom' && (
-                  <View style={{ marginTop: 6 }}>
-                    <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4 }}>Cantidad en kg</Text>
-                    <TextInput style={styles.inputHighlight} placeholder="Ej: 0.300 o 1.250" keyboardType="decimal-pad" value={posterCustomKg} onChangeText={setPosterCustomKg} />
-                  </View>
-                )}
-              </View>
-            )}
-
-            {/* Opciones de Etiqueta y Formato */}
-            <View style={styles.card}>
-              <Text style={styles.subSectionTitle}>2. Etiqueta Comercial</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
-                {[
-                  ['SIN_ETIQUETA', 'Sin etiqueta'],
-                  ['NUEVO', 'NUEVO'],
-                  ['RECOMENDADO', 'RECOMENDADO'],
-                  ['IDEAL PARA PICADAS', 'IDEAL PARA PICADAS'],
-                  ['IMPERDIBLE', 'IMPERDIBLE'],
-                  ['OFERTA', 'OFERTA']
-                ].map(([bKey, bLabel]) => (
-                  <TouchableOpacity 
-                    key={bKey} 
-                    style={[styles.typeBtn, { marginRight: 6, paddingHorizontal: 10 }, posterBadge === bKey && { backgroundColor: '#d32f2f', borderColor: '#b71c1c' }]} 
-                    onPress={() => setPosterBadge(bKey)}
-                  >
-                    <Text style={{ fontSize: 11, color: posterBadge === bKey ? '#fff' : '#333', fontWeight: 'bold' }}>{bLabel}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-
-              {posterMode === 'promocion' && selectedPosterPromo && (
-                <View style={{ marginVertical: 8 }}>
-                  <TouchableOpacity 
-                    style={[styles.typeBtn, { backgroundColor: posterShowSavings ? '#28a745' : '#e9ecef', padding: 10 }]} 
-                    onPress={() => setPosterShowSavings(!posterShowSavings)}
-                  >
-                    <Text style={{ color: posterShowSavings ? '#fff' : '#333', fontWeight: 'bold', textAlign: 'center', fontSize: 12 }}>
-                      {posterShowSavings ? '✓ Mostrar precio normal y ahorro' : '✗ Ocultar precio normal y ahorro'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              <Text style={styles.subSectionTitle}>3. Formato de Impresión</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
-                {[
-                  ['A4_VERTICAL', 'A4 Vertical'],
-                  ['A4_HORIZONTAL', 'A4 Horizontal'],
-                  ['A4_2_POR_HOJA', '2 por A4'],
-                  ['A4_4_POR_HOJA', '4 por A4']
-                ].map(([fKey, fLabel]) => (
-                  <TouchableOpacity 
-                    key={fKey} 
-                    style={[styles.typeBtn, { marginRight: 6, paddingHorizontal: 10 }, posterFormat === fKey && { backgroundColor: '#007bff' }]} 
-                    onPress={() => setPosterFormat(fKey)}
-                  >
-                    <Text style={{ fontSize: 11, color: posterFormat === fKey ? '#fff' : '#333', fontWeight: 'bold' }}>{fLabel}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-
-            {/* Vista Previa Simplificada */}
-            <View style={[styles.card, { borderWidth: 3, borderColor: '#d32f2f', backgroundColor: '#fffde7' }]}>
-              <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#d32f2f', textAlign: 'center', marginBottom: 6 }}>👁️ VISTA PREVIA DEL CARTEL</Text>
-              
-              {posterMode === 'producto' ? (
-                selectedPosterProduct ? (() => {
-                  const commercial = getPosterCommercialData();
-                  const visualType = selectedPosterProduct.visual_presentation || 'unidad';
-                  return (
-                    <View style={{ alignItems: 'center', padding: 10 }}>
-                      {posterBadge !== 'SIN_ETIQUETA' && (
-                        <View style={{ backgroundColor: '#d32f2f', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 4, marginBottom: 8 }}>
-                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>🔥 {posterBadge} 🔥</Text>
-                        </View>
-                      )}
-                      <Text style={{ fontSize: 20, fontWeight: '900', textAlign: 'center', textTransform: 'uppercase' }}>{selectedPosterProduct.name}</Text>
-                      {selectedPosterProduct.brand ? <Text style={{ fontSize: 12, color: '#555', fontWeight: 'bold', marginTop: 2 }}>{selectedPosterProduct.brand}</Text> : null}
-                      
-                      {renderVisualGraphicPreview(visualType)}
-
-                      <View style={{ backgroundColor: '#000', paddingHorizontal: 20, paddingVertical: 8, borderRadius: 8, borderWidth: 2, borderColor: '#d32f2f', alignItems: 'center' }}>
-                        <Text style={{ fontSize: 26, fontWeight: '900', color: '#ffeb3b' }}>
-                          {commercial.priceDisplay} <Text style={{ fontSize: 14, color: '#fff' }}>/{commercial.unitDisplay}</Text>
-                        </Text>
-                      </View>
-                      {commercial.subtitleDisplay && (
-                        <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#333', marginTop: 6 }}>{commercial.subtitleDisplay}</Text>
-                      )}
-                    </View>
-                  );
-                })() : <Text style={{ textAlign: 'center', color: '#888', fontStyle: 'italic', padding: 20 }}>Seleccioná un producto arriba</Text>
-              ) : (
-                selectedPosterPromo ? (
-                  <View style={{ alignItems: 'center', padding: 10 }}>
-                    {posterBadge !== 'SIN_ETIQUETA' && (
-                      <View style={{ backgroundColor: '#d32f2f', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 4, marginBottom: 8 }}>
-                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>🔥 {posterBadge} 🔥</Text>
-                      </View>
-                    )}
-                    <Text style={{ fontSize: 20, fontWeight: '900', textAlign: 'center', textTransform: 'uppercase', color: '#6f42c1' }}>{selectedPosterPromo.name}</Text>
-                    {selectedPosterPromo.description ? <Text style={{ fontSize: 11, color: '#555', fontStyle: 'italic', marginVertical: 4 }}>{selectedPosterPromo.description}</Text> : null}
-
-                    <View style={{ width: '90%', backgroundColor: '#fff', padding: 8, borderWidth: 1, borderStyle: 'dashed', borderColor: '#000', marginVertical: 8 }}>
-                      {(selectedPosterPromo.items || []).map((ci, idx) => (
-                        <Text key={idx} style={{ fontSize: 12, fontWeight: 'bold', color: '#333' }}>• {formatQuantityVisual(ci.included_qty, ci.unit_type)} {ci.product_name || ci.name}</Text>
-                      ))}
-                    </View>
-
-                    {posterShowSavings ? (() => {
-                      let normTotal = 0;
-                      (selectedPosterPromo.items || []).forEach(ci => {
-                        normTotal += Number(ci.included_qty || 0) * Number(ci.regular_unit_price || ci.price_per_unit || 0);
-                      });
-                      const promoP = Number(selectedPosterPromo.promo_price || 0);
-                      const ahorro = normTotal - promoP;
-                      return (
-                        <View style={{ backgroundColor: '#000', padding: 10, borderRadius: 8, alignItems: 'center', width: '90%', borderWidth: 2, borderColor: '#28a745' }}>
-                          {normTotal > promoP && <Text style={{ fontSize: 12, color: '#ff8a80', textDecorationLine: 'line-through' }}>Antes: {formatMoney(normTotal)}</Text>}
-                          <Text style={{ fontSize: 22, fontWeight: '900', color: '#ffeb3b' }}>Ahora: {formatMoney(promoP)}</Text>
-                          {ahorro > 0 && <Text style={{ fontSize: 12, color: '#81c784', fontWeight: 'bold', marginTop: 2 }}>¡Ahorrás: {formatMoney(ahorro)}!</Text>}
-                        </View>
-                      );
-                    })() : (
-                      <View style={{ backgroundColor: '#000', paddingHorizontal: 20, paddingVertical: 8, borderRadius: 8 }}>
-                        <Text style={{ fontSize: 24, fontWeight: '900', color: '#ffeb3b' }}>{formatMoney(selectedPosterPromo.promo_price ?? 0)}</Text>
-                      </View>
-                    )}
-                  </View>
-                ) : <Text style={{ textAlign: 'center', color: '#888', fontStyle: 'italic', padding: 20 }}>Seleccioná una promoción arriba</Text>
-              )}
-            </View>
-
-            {/* Botones de Generación y Acción */}
-            {(selectedPosterProduct || selectedPosterPromo) && (
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
-                <TouchableOpacity style={[styles.buttonPrimary, { flex: 0.48, backgroundColor: '#007bff' }]} onPress={handleGeneratePosterPdf} disabled={loading}>
-                  <Text style={styles.buttonText}>📄 Generar PDF</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.buttonPrimary, { flex: 0.48, backgroundColor: '#6f42c1' }]} onPress={handlePrintPoster} disabled={loading}>
-                  <Text style={styles.buttonText}>🖨️ Imprimir Cartel</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </ScrollView>
+          <PosterMaker
+            branchId={branchId}
+            branchName={branchName}
+            products={products}
+            promotions={promotions}
+            onRefreshPromotions={loadPromotions}
+            formatMoney={formatMoney}
+          />
         )}
 
         {/* CAJA */}
@@ -3730,7 +3241,7 @@ return (
                       return (
                         <View key={item.product_id} style={{ padding: 10, backgroundColor: '#f8f9fa', borderRadius: 8, marginBottom: 10, borderWidth: 1, borderColor: '#dee2e6' }}>
                           <Text style={{ fontWeight: 'bold', fontSize: 14, color: '#222' }}>{item.name}</Text>
-                          <Text style={{ fontSize: 11, color: '#555', marginBottom: 6 }}>Base: {formatMoney(item.base_price)} · Stock actual: {item.stock} {unitLabel}</Text>
+                          <Text style={{ fontSize: 11, color: '#555', marginBottom: 6 }}>Precio base (global): {formatMoney(item.base_price)} · Stock actual: {item.stock} {unitLabel}</Text>
 
                           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
                             <View style={{ flex: 1, marginRight: 6 }}>
@@ -3764,6 +3275,46 @@ return (
                               <Text style={styles.buttonText}>Retirar de sucursal</Text>
                             </TouchableOpacity>
                           </View>
+
+                          {(canEditRecords || isAdminLevel) && stockEditForm?.product_id !== item.product_id && (
+                            <TouchableOpacity style={{ marginTop: 8, paddingVertical: 8, alignItems: 'center', borderRadius: 6, borderWidth: 1, borderColor: '#6c757d' }} onPress={() => handleStartEditProduct(item)} disabled={loading}>
+                              <Text style={{ color: '#495057', fontWeight: 'bold', fontSize: 12 }}>✏️ Datos del producto</Text>
+                            </TouchableOpacity>
+                          )}
+
+                          {stockEditForm?.product_id === item.product_id && (
+                            <View style={{ marginTop: 10, padding: 10, backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#6c757d' }}>
+                              <Text style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 6 }}>✏️ Datos del producto (todas las sucursales)</Text>
+                              <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#444' }}>Nombre</Text>
+                              <TextInput style={styles.input} value={stockEditForm.name} onChangeText={(v) => setStockEditForm({ ...stockEditForm, name: v })} />
+                              <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#444' }}>Marca</Text>
+                              <TextInput style={styles.input} value={stockEditForm.brand} placeholder="Sin marca" onChangeText={(v) => setStockEditForm({ ...stockEditForm, brand: v })} />
+                              <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#444' }}>Categoría</Text>
+                              <TextInput style={styles.input} value={stockEditForm.category} onChangeText={(v) => setStockEditForm({ ...stockEditForm, category: v })} />
+                              <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#444' }}>EAN</Text>
+                              <TextInput style={styles.input} value={stockEditForm.barcode} placeholder="Sin EAN" keyboardType="numeric" onChangeText={(v) => setStockEditForm({ ...stockEditForm, barcode: v })} />
+                              <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#444', marginBottom: 4 }}>Presentación visual</Text>
+                              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+                                {VISUAL_PRESENTATION_OPTIONS.map(([vKey, vLabel]) => (
+                                  <TouchableOpacity key={vKey} style={[styles.typeBtn, { marginRight: 6, paddingHorizontal: 10 }, stockEditForm.visual_presentation === vKey && { backgroundColor: '#007bff' }]}
+                                    onPress={() => setStockEditForm({ ...stockEditForm, visual_presentation: vKey })}>
+                                    <Text style={{ fontSize: 11, color: stockEditForm.visual_presentation === vKey ? '#fff' : '#333', fontWeight: 'bold' }}>{vLabel}</Text>
+                                  </TouchableOpacity>
+                                ))}
+                              </ScrollView>
+                              <Text style={{ fontSize: 10, color: '#666', fontStyle: 'italic', marginBottom: 8 }}>
+                                Los precios no se editan acá. Precio base (global): {formatMoney(stockEditForm.base_price)}. El precio de {branchName} se guarda en "Precio en sucursal". Unidad, vencimiento, proveedor, política MRP, stock, lotes y costos se conservan.
+                              </Text>
+                              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                                <TouchableOpacity style={[styles.buttonPrimary, { flex: 0.48, marginTop: 0 }]} onPress={handleSaveProduct} disabled={loading}>
+                                  <Text style={styles.buttonText}>💾 Guardar datos</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity style={[styles.buttonPrimary, { flex: 0.48, marginTop: 0, backgroundColor: '#6c757d' }]} onPress={handleCancelEditProduct} disabled={loading}>
+                                  <Text style={styles.buttonText}>Cancelar</Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          )}
                         </View>
                       );
                     })
@@ -3938,17 +3489,7 @@ return (
                   
                   <Text style={{fontWeight:'bold',marginTop:8,marginBottom:4}}>Presentación para carteles</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:10}}>
-                    {[
-                      ['horma_redonda', 'Horma redonda'],
-                      ['horma_rectangular', 'Horma rectangular'],
-                      ['barra', 'Barra'],
-                      ['embutido_entero', 'Embutido entero'],
-                      ['jamon_entero', 'Jamón entero'],
-                      ['botella', 'Botella'],
-                      ['paquete', 'Paquete'],
-                      ['unidad', 'Unidad / pieza'],
-                      ['otro', 'Otro']
-                    ].map(([vKey, vLabel]) => (
+                    {VISUAL_PRESENTATION_OPTIONS.map(([vKey, vLabel]) => (
                       <TouchableOpacity
                         key={vKey}
                         style={[styles.typeBtn, { marginRight: 6, paddingHorizontal: 10 }, prodVisualPresentation === vKey && { backgroundColor: '#007bff' }]}
