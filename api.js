@@ -517,3 +517,41 @@ export const removeBranchProduct = async (branchId, productId) => {
 
   return await res.json();
 };
+
+// ===== OBJETIVO DE JORNADA — FERIA (branch_id=2) =====
+
+const fairJsonRequest = async (path, method, data, fallback) => {
+  const options = { method, headers: { "Content-Type": "application/json" } };
+  if (data !== undefined) options.body = JSON.stringify(data);
+  const res = await fetch(`${API_URL}${path}`, options);
+  // Propaga el mensaje real del backend (incluidos los 422 de validación).
+  if (!res.ok) throw new Error(await getApiErrorMessage(res, fallback));
+  return await res.json();
+};
+
+export const fetchFairConfig = (branchId = 2) =>
+  fairJsonRequest(`/branches/${branchId}/fair-config`, "GET", undefined, "Error al obtener la configuración de Feria");
+
+export const updateFairConfig = (data, branchId = 2) =>
+  fairJsonRequest(`/branches/${branchId}/fair-config`, "PUT", data, "Error al guardar la configuración de Feria");
+
+export const previewFairDayPlan = (data) =>
+  fairJsonRequest(`/day-plans/preview`, "POST", data, "Error al analizar la jornada");
+
+export const createFairDayPlan = (data) =>
+  fairJsonRequest(`/day-plans`, "POST", data, "Error al guardar el plan");
+
+export const fetchFairDayPlans = (branchId = 2) =>
+  fairJsonRequest(`/day-plans?branch_id=${branchId}`, "GET", undefined, "Error al obtener los planes");
+
+export const fetchFairDayPlan = (id) =>
+  fairJsonRequest(`/day-plans/${id}`, "GET", undefined, "Error al obtener el plan");
+
+export const updateFairDayPlan = (id, data) =>
+  fairJsonRequest(`/day-plans/${id}`, "PUT", data, "Error al actualizar el plan");
+
+export const recalculateFairDayPlan = (id, actor = null) =>
+  fairJsonRequest(`/day-plans/${id}/recalculate`, "POST", { actor }, "Error al recalcular el plan");
+
+export const updateFairDayPlanStatus = (id, status, actor = null, reason = null) =>
+  fairJsonRequest(`/day-plans/${id}/status`, "PATCH", { status, actor, reason }, "Error al cambiar el estado del plan");
