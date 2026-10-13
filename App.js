@@ -828,14 +828,14 @@ export default function App() {
         });
       }
 
-      // 3. Ejecutar updateIngress para corregir el ingreso
+      // 3. Ejecutar updateIngress para corregir el ingreso (CORRECCIÓN 1: No borrar vencimiento automáticamente)
       const targetId = editingIngress.ingress_id ?? editingIngress.id;
       await updateIngress(targetId, {
         quantity: qty,
         cost_price: cost,
         supplier: editIngressSupplier.trim() || null,
         lot_number: editIngressLot.trim() || null,
-        expiration_date: editProdRequiresExpiration ? expirationIso : null,
+        expiration_date: expirationIso,
         actor: email,
         reason: editIngressReason.trim()
       }, branchId || 1);
@@ -3876,7 +3876,11 @@ return (
                             const prodNameStr = item.product_name || item.name || `Producto #${item.product_id}`;
                             const eanVal = item.barcode || 'Sin EAN';
                             const categoryVal = item.category || 'Varios';
-                            const brandVal = item.brand || null;
+                            
+                            // CORRECCIÓN 3: Obtener marca de forma segura desde el producto si item.brand no existe
+                            const matchedProdForBrand = products.find(p => p.id === item.product_id);
+                            const brandVal = item.brand || matchedProdForBrand?.brand || null;
+
                             const qtyVal = item.quantity ?? '-';
                             const unitVal = item.unit_type || 'unid';
                             const costVal = formatMoney(item.unit_cost ?? item.cost_price ?? 0);
@@ -3903,9 +3907,10 @@ return (
                               }
                             }
 
-                            // Precio de venta sucursal actual si está disponible
-                            const currentBranchPriceVal = item.branch_price ?? item.price_per_unit;
-                            const branchPriceStr = currentBranchPriceVal != null ? formatMoney(currentBranchPriceVal) : 'No disponible';
+                            // CORRECCIÓN 2: Buscar precio actual en products mediante product.id === item.product_id
+                            const matchedProduct = products.find(p => p.id === item.product_id);
+                            const currentPriceVal = matchedProduct ? (matchedProduct.branch_price ?? matchedProduct.price_per_unit) : null;
+                            const branchPriceStr = currentPriceVal != null ? formatMoney(currentPriceVal) : 'No disponible';
 
                             return (
                               <View key={recId} style={{ backgroundColor: '#f8f9fa', padding: 12, borderRadius: 8, marginBottom: 12, borderWidth: 1, borderColor: '#dee2e6' }}>
@@ -3917,7 +3922,7 @@ return (
                                 <Text style={{ fontSize: 13, color: '#222', marginBottom: 2 }}>Costo: {costVal} c/u</Text>
                                 <Text style={{ fontSize: 13, color: '#222', marginBottom: 2 }}>Proveedor: {supplierVal}</Text>
                                 <Text style={{ fontSize: 13, color: '#222', marginBottom: 2 }}>Vencimiento: {expVal}</Text>
-                                <Text style={{ fontSize: 13, color: '#222', marginBottom: 4 }}>Precio Feria actual: {branchPriceStr}</Text>
+                                <Text style={{ fontSize: 13, color: '#222', marginBottom: 4 }}>Precio actual: {branchPriceStr}</Text>
                                 {lotVal && <Text style={{ fontSize: 11, color: '#777', fontStyle: 'italic', marginBottom: 6 }}>Lote: {lotVal}</Text>}
 
                                 <TouchableOpacity style={[styles.buttonPrimary, { backgroundColor: '#fd7e14', marginTop: 6 }]} onPress={() => beginIngressCorrection(item)}>
