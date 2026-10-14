@@ -4197,7 +4197,7 @@ return (
           {canFairPlanner && (
             <TouchableOpacity style={[styles.navBtn, currentTab === 'feria' && styles.navActive]} onPress={() => handleTabChange('feria')}>
               <Text style={styles.navIcon}>🎪</Text>
-              <Text style={styles.navText}>¿Conviene abrir?</Text>
+              <Text style={styles.navText}>Feria</Text>
             </TouchableOpacity>
           )}
 

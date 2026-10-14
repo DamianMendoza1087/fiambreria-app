@@ -5,8 +5,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, Platform, Alert } from 'react-native';
 import {
   fetchFairConfig, updateFairConfig, previewFairDayPlan, createFairDayPlan, fetchFairDayPlans,
-  fetchFairDayPlan, recalculateFairDayPlan, updateFairDayPlanStatus,
+  fetchFairDayPlan, recalculateFairDayPlan, updateFairDayPlanStatus, fetchOpenFairDayPlan,
 } from './api';
+import FairLiveSession from './FairLiveSession';
 
 const FAIR_BRANCH_ID = 2;
 
@@ -362,7 +363,9 @@ const Field = ({ label, value, onChange, placeholder, keyboardType = 'numeric', 
 // ---------- Componente ----------
 
 export default function FairDayPlanner({ branchId, userEmail, canEditConfig, formatMoney, formatQuantityVisual, applyDateMask }) {
-  const [view, setView] = useState('home'); // home | new | plans | detail | config
+  const [view, setView] = useState('home'); // home | new | plans | detail | config | live
+  const [liveMode, setLiveMode] = useState({ mode: 'current', planId: null }); // Jornada en vivo
+  const [openSession, setOpenSession] = useState(null); // plan ABIERTO (si hay)
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
 
@@ -421,7 +424,20 @@ export default function FairDayPlanner({ branchId, userEmail, canEditConfig, for
     }
   };
 
-  useEffect(() => { loadConfig(); }, []);
+  const loadOpenSession = async () => {
+    try {
+      const res = await fetchOpenFairDayPlan(FAIR_BRANCH_ID);
+      setOpenSession(res?.open ? res.plan : null);
+    } catch (_) {
+      setOpenSession(null); // el acceso a la jornada en vivo vuelve a consultar al entrar
+    }
+  };
+
+  useEffect(() => { loadConfig(); loadOpenSession(); }, []);
+
+  // 🎪 Jornada en vivo: componente aparte (FairLiveSession).
+  const goLive = (mode, planId = null) => { setLiveMode({ mode, planId }); setView('live'); };
+  const leaveLive = () => { setView('home'); setPlansLoaded(false); loadOpenSession(); };
 
   // Cualquier cambio en el formulario invalida el preview: no se puede guardar algo distinto a lo analizado.
   const invalidatePreview = () => { setPreview(null); setPreviewPayload(null); setSavedPlanId(null); };
@@ -592,12 +608,26 @@ export default function FairDayPlanner({ branchId, userEmail, canEditConfig, for
     return (
       <ScrollView contentContainerStyle={s.container}>
         {header}
+        {openSession ? (
+          <TouchableOpacity style={[s.card, s.liveBanner]} onPress={() => goLive('current')}>
+            <Text style={s.liveBannerTitle}>🎪 Jornada en curso</Text>
+            <Text style={s.muted}>{dateRangeText(openSession)} · {PLAN_TYPE_LABELS[openSession.plan_type] || openSession.plan_type}</Text>
+          </TouchableOpacity>
+        ) : null}
+        <Text style={s.sectionTitle}>Antes de ir: ¿Conviene abrir?</Text>
         <Text style={s.lead}>Calculá si conviene abrir antes de comprometer gastos y mercadería.</Text>
         <TouchableOpacity style={[s.bigBtn, { backgroundColor: '#6f42c1' }]} onPress={() => setView('new')}>
           <Text style={s.bigBtnText}>NUEVO ANÁLISIS</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[s.bigBtn, { backgroundColor: '#007bff' }]} onPress={openPlans}>
           <Text style={s.bigBtnText}>PLANES GUARDADOS</Text>
+        </TouchableOpacity>
+        <Text style={s.sectionTitle}>Durante y después de la Feria</Text>
+        <TouchableOpacity style={[s.bigBtn, { backgroundColor: '#28a745' }]} onPress={() => goLive('current')}>
+          <Text style={s.bigBtnText}>{openSession ? '🎪 VER JORNADA EN CURSO' : '🎪 JORNADA EN VIVO'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[s.bigBtn, { backgroundColor: '#343a40' }]} onPress={() => goLive('history')}>
+          <Text style={s.bigBtnText}>📋 JORNADAS ANTERIORES</Text>
         </TouchableOpacity>
         {canEditConfig && (
           <TouchableOpacity style={s.secondaryBtn} onPress={openConfig}>
@@ -715,6 +745,16 @@ export default function FairDayPlanner({ branchId, userEmail, canEditConfig, for
                 <TouchableOpacity style={[s.actionBtn, { backgroundColor: '#007bff' }]} onPress={() => openDetail(p.id)} disabled={busy}>
                   <Text style={s.actionText}>VER DETALLE</Text>
                 </TouchableOpacity>
+                {editable && p?.can_open_today && (
+                  <TouchableOpacity style={[s.actionBtn, { backgroundColor: '#28a745' }]} onPress={() => goLive('start', p.id)} disabled={busy}>
+                    <Text style={s.actionText}>▶️ INICIAR JORNADA</Text>
+                  </TouchableOpacity>
+                )}
+                {p?.status === 'ABIERTA' && (
+                  <TouchableOpacity style={[s.actionBtn, { backgroundColor: '#6f42c1' }]} onPress={() => goLive('current')} disabled={busy}>
+                    <Text style={s.actionText}>🎪 JORNADA EN CURSO</Text>
+                  </TouchableOpacity>
+                )}
                 {editable && (
                   <TouchableOpacity style={[s.actionBtn, { backgroundColor: '#17a2b8' }]} onPress={() => recalculate(p.id, false)} disabled={busy}>
                     <Text style={s.actionText}>RECALCULAR</Text>
@@ -773,6 +813,21 @@ export default function FairDayPlanner({ branchId, userEmail, canEditConfig, for
           ))}
         </View>
 
+        {editable && plan.can_open_today && (
+          <TouchableOpacity style={[s.bigBtn, { backgroundColor: busy ? '#999' : '#28a745' }]} onPress={() => goLive('start', plan.id)} disabled={busy}>
+            <Text style={s.bigBtnText}>▶️ INICIAR JORNADA</Text>
+          </TouchableOpacity>
+        )}
+        {plan.status === 'ABIERTA' && (
+          <TouchableOpacity style={[s.bigBtn, { backgroundColor: '#6f42c1' }]} onPress={() => goLive('current')} disabled={busy}>
+            <Text style={s.bigBtnText}>🎪 VER JORNADA EN CURSO</Text>
+          </TouchableOpacity>
+        )}
+        {plan.status === 'CERRADA' && (
+          <TouchableOpacity style={[s.bigBtn, { backgroundColor: '#343a40' }]} onPress={() => goLive('history')} disabled={busy}>
+            <Text style={s.bigBtnText}>📋 VER JORNADAS ANTERIORES</Text>
+          </TouchableOpacity>
+        )}
         {editable && (
           <TouchableOpacity style={[s.bigBtn, { backgroundColor: busy ? '#999' : '#17a2b8' }]} onPress={() => recalculate(plan.id, true)} disabled={busy}>
             {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.bigBtnText}>🔄 RECALCULAR CON DATOS ACTUALES</Text>}
@@ -793,6 +848,13 @@ export default function FairDayPlanner({ branchId, userEmail, canEditConfig, for
           </TouchableOpacity>
         )}
       </ScrollView>
+    );
+  }
+
+  if (view === 'live') {
+    return (
+      <FairLiveSession key={`${liveMode.mode}-${liveMode.planId}`} mode={liveMode.mode} planId={liveMode.planId}
+        userEmail={userEmail} formatMoney={formatMoney} onBack={leaveLive} />
     );
   }
 
@@ -896,4 +958,6 @@ const s = StyleSheet.create({
   actions: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 8 },
   actionBtn: { paddingHorizontal: 12, paddingVertical: 9, borderRadius: 6, marginRight: 6, marginBottom: 6 },
   actionText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
+  liveBanner: { borderColor: '#28a745', borderWidth: 2, backgroundColor: '#f0fff4' },
+  liveBannerTitle: { fontSize: 16, fontWeight: 'bold', color: '#155724' },
 });
