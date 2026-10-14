@@ -555,3 +555,18 @@ export const recalculateFairDayPlan = (id, actor = null) =>
 
 export const updateFairDayPlanStatus = (id, status, actor = null, reason = null) =>
   fairJsonRequest(`/day-plans/${id}/status`, "PATCH", { status, actor, reason }, "Error al cambiar el estado del plan");
+
+// ===== JORNADA DE FERIA EN VIVO (branch_id=2) =====
+// El backend calcula todo; actor = email del usuario (validación de coherencia, no autenticación).
+
+export const fetchOpenFairDayPlan = (branchId = 2) =>
+  fairJsonRequest(`/day-plans/open?branch_id=${branchId}`, "GET", undefined, "Error al consultar la jornada en curso");
+
+export const openFairDayPlan = (id, actor) =>
+  fairJsonRequest(`/day-plans/${id}/open`, "POST", { actor }, "Error al iniciar la jornada");
+
+export const fetchFairDayPlanLive = (id) =>
+  fairJsonRequest(`/day-plans/${id}/live`, "GET", undefined, "Error al obtener la jornada");
+
+export const closeFairDayPlan = (id, actor) =>
+  fairJsonRequest(`/day-plans/${id}/close`, "POST", { actor }, "Error al cerrar la jornada");
