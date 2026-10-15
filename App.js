@@ -143,10 +143,22 @@ export default function App() {
     }
   };
 
+  // Misma regla que el backend: sin precio de sucursal propio > 0 no se reactiva (nunca el precio global).
+  const branchPriceMissingMessage = (productName) =>
+    `"${productName}" no tiene precio de venta configurado para ${branchName}.\n\nPrimero cargá el precio en "Precio en sucursal" (Stock > Administración por Sucursal), tocá Guardar y después reactivalo.`;
+
   const reactivateProductInBranch = async (item) => {
+    // Aviso anticipado; la validación que manda es la del backend.
+    if ('branch_price_configured' in item) {
+      const configuredPrice = Number(item.branch_price_configured);
+      if (item.branch_price_configured == null || !Number.isFinite(configuredPrice) || configuredPrice <= 0) {
+        alert(branchPriceMissingMessage(item.name));
+        return;
+      }
+    }
     const confirmed = await confirmAction(
       'Reactivar en sucursal',
-      `"${item.name}" volverá a estar disponible para la venta en ${branchName} a ${formatMoney(item.branch_price)}.`,
+      `"${item.name}" volverá a estar disponible para la venta en ${branchName} a ${formatMoney(item.branch_price_configured ?? item.branch_price)}.`,
       'Reactivar'
     );
     if (!confirmed) return;
@@ -156,6 +168,10 @@ export default function App() {
       await refreshBranchCatalogs();
       alert(`✅ "${item.name}" está disponible otra vez en ${branchName}.`);
     } catch (e) {
+      if (e.code === 'BRANCH_PRICE_REQUIRED_FOR_REACTIVATION') {
+        alert(branchPriceMissingMessage(item.name));
+        return;
+      }
       alert(e.message || 'No se pudo reactivar el producto');
     } finally {
       setLoading(false);
@@ -1027,7 +1043,14 @@ export default function App() {
           return;
         }
         setLoading(true);
-        await createIngress({ ...ingressPayload, reactivate_branch_product: true }, branchId || 1);
+        try {
+          await createIngress({ ...ingressPayload, reactivate_branch_product: true }, branchId || 1);
+        } catch (eReactivate) {
+          if (eReactivate.code !== 'BRANCH_PRICE_REQUIRED_FOR_REACTIVATION') throw eReactivate;
+          // El backend rechazó todo: no se registró el ingreso ni se reactivó el producto.
+          alert(`⚠️ No se registró el ingreso.\n\n${branchPriceMissingMessage(prodName.trim())}`);
+          return;
+        }
       }
       // La presentación visual es solo un dato de cartelería: se actualiza después del ingreso y
       // si falla no afecta el ingreso ya registrado.
