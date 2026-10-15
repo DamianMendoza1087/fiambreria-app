@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar, Alert } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Platform, StatusBar, Alert, useWindowDimensions } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -7,7 +7,7 @@ import * as FileSystem from 'expo-file-system';
 import * as XLSX from 'xlsx';
 import FairDayPlanner from './FairDayPlanner';
 import PosterMaker from './PosterMaker';
-import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProfitability, fetchMasterProductByBarcode, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, updateIngress, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled, actOnAlert, fetchAlertHistory, updateReplenishmentPolicy, fetchBranchProductsAdmin, configureBranchProduct, removeBranchProduct, fetchLatestProductAudit, fetchSalesHistory, fetchSaleDetail, fetchPromotions, fetchPromotionDetail, createPromotion, updatePromotion, deletePromotion, calculatePromotion, fetchIngressHistory } from './api';
+import { loginUser, fetchProducts, createProduct, updateProduct, deleteProduct, fetchUsers, createUser, updateUserPermissions, submitStockAudit, createPreSale, fetchPendingPreSales, deletePreSale, finalizeSale, fetchCashSessionStatus, openCashSession, closeCashSession, fetchCashAuditsByDate, fetchWorkLogs, compareEmployeesMetrics, fetchMRPStats, fetchSystemAlerts, fetchProductLots, fetchKPIsDashboard, fetchProfitability, fetchMasterProductByBarcode, fetchProductByBarcode, searchProducts, createProductMaster, createIngress, fetchIngresses, updateIngress, createCashMovement, fetchCashMovements, createStockLoss, startHRShift, endHRShift, fetchActiveHRShifts, fetchHRWorkLogs, compareHR, setUserEnabled, actOnAlert, fetchAlertHistory, updateReplenishmentPolicy, fetchBranchProductsAdmin, configureBranchProduct, removeBranchProduct, fetchRetirePreview, reactivateBranchProduct, fetchLatestProductAudit, fetchSalesHistory, fetchSaleDetail, fetchPromotions, fetchPromotionDetail, createPromotion, updatePromotion, deletePromotion, calculatePromotion, fetchIngressHistory } from './api';
 
 // Presentaciones visuales del producto (Ingresos y edición desde Stock).
 const VISUAL_PRESENTATION_OPTIONS = [
@@ -84,14 +84,79 @@ export default function App() {
     }
   };
 
+  // Confirmación con botones Cancelar / Confirmar (Alert nativo en Android/iOS, confirm en web).
+  const confirmAction = (title, message, confirmLabel = 'Confirmar', destructive = false) => new Promise((resolve) => {
+    if (Platform.OS === 'web') {
+      resolve(typeof window !== 'undefined' && typeof window.confirm === 'function' ? window.confirm(`${title}\n\n${message}`) : false);
+      return;
+    }
+    Alert.alert(title, message, [
+      { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
+      { text: confirmLabel, style: destructive ? 'destructive' : 'default', onPress: () => resolve(true) }
+    ], { cancelable: true, onDismiss: () => resolve(false) });
+  });
+
+  const refreshBranchCatalogs = async () => {
+    await loadBranchAdminProducts();
+    setProducts(await fetchProducts(branchId || 1));
+  };
+
+  // Retirar de sucursal: solo deshabilita el producto en ESTA sucursal (no borra producto, partidas ni historial).
   const disableBranchProduct = async (item) => {
+    let preview;
     try {
       setLoading(true);
-      await removeBranchProduct(branchId, item.product_id);
-      await loadBranchAdminProducts();
-      setProducts(await fetchProducts(branchId || 1));
+      preview = await fetchRetirePreview(branchId, item.product_id);
+    } catch (e) {
+      alert(e.message || 'No se pudo consultar el stock del producto');
+      return;
+    } finally {
+      setLoading(false);
+    }
+
+    const unit = preview.unit_type === 'kg' ? 'kg' : 'unid';
+    let message = `"${preview.product_name}" dejará de estar disponible para la venta y la cartelería en ${preview.branch_name}.\n\nEl producto, sus partidas y su historial no se borran. Podés reactivarlo cuando quieras.`;
+    if (preview.requires_confirmation) {
+      const qtyText = Number(preview.stock).toLocaleString('es-AR', { maximumFractionDigits: 3 });
+      const valueText = preview.stock_value_at_cost != null
+        ? `Valor a costo: ${formatMoney(preview.stock_value_at_cost)}.`
+        : 'Valor a costo: no disponible (hay partidas sin costo cargado).';
+      message = `⚠️ Todavía hay ${qtyText} ${unit} en stock en ${preview.branch_name}.\n${valueText}\n\nEse stock quedará sin vender mientras el producto esté retirado.\n\n` + message;
+    }
+
+    const confirmed = await confirmAction('Retirar de sucursal', message, 'Retirar', true);
+    if (!confirmed) return;
+
+    try {
+      setLoading(true);
+      await removeBranchProduct(branchId, item.product_id, {
+        confirmStock: preview.requires_confirmation,
+        actor: email || null,
+        reason: 'Retirar de sucursal desde Stock'
+      });
+      await refreshBranchCatalogs();
+      alert(`✅ "${preview.product_name}" quedó RETIRADO de ${preview.branch_name}.`);
     } catch (e) {
       alert(e.message || 'No se pudo retirar el producto');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const reactivateProductInBranch = async (item) => {
+    const confirmed = await confirmAction(
+      'Reactivar en sucursal',
+      `"${item.name}" volverá a estar disponible para la venta en ${branchName} a ${formatMoney(item.branch_price)}.`,
+      'Reactivar'
+    );
+    if (!confirmed) return;
+    try {
+      setLoading(true);
+      await reactivateBranchProduct(branchId, item.product_id, email || null, 'Reactivar desde Stock');
+      await refreshBranchCatalogs();
+      alert(`✅ "${item.name}" está disponible otra vez en ${branchName}.`);
+    } catch (e) {
+      alert(e.message || 'No se pudo reactivar el producto');
     } finally {
       setLoading(false);
     }
@@ -142,6 +207,9 @@ export default function App() {
   const [canCarteleria, setCanCarteleria] = useState(false);
 
   const [currentTab, setCurrentTab] = useState('preventa');
+  // Pantallas angostas (Android): encabezados con botón pasan a dos renglones.
+  const { width: windowWidth } = useWindowDimensions();
+  const isNarrowScreen = windowWidth < 420;
   // Administración de catálogo por sucursal
   const [branchAdminProducts, setBranchAdminProducts] = useState([]);
   const [branchAdminSearch, setBranchAdminSearch] = useState('');
@@ -629,7 +697,7 @@ export default function App() {
 
         if (found) {
           selectIngressProduct(found);
-          alert(`Producto reconocido: ${found.name}. Se habilitará en ${branchName || 'esta sucursal'} al guardar el ingreso.`);
+          alert(`Producto reconocido: ${found.name}. Hoy no está disponible en ${branchName || 'esta sucursal'}; si estaba retirado, al guardar se te pedirá confirmación para reactivarlo.`);
           return;
         }
       }
@@ -942,7 +1010,25 @@ export default function App() {
         productId=created.id;
       }
       const isExistingProduct = !!ingressProductId;
-      await createIngress({product_id:productId,supplier:prodSupplier||null,cost_price:cost,quantity:qty,lot_number:prodLotNumber||null,expiration_date:expirationIso,received_by:email,notes:'Ingreso desde App V2'}, branchId || 1);
+      const ingressPayload = {product_id:productId,supplier:prodSupplier||null,cost_price:cost,quantity:qty,lot_number:prodLotNumber||null,expiration_date:expirationIso,received_by:email,notes:'Ingreso desde App V2'};
+      try {
+        await createIngress(ingressPayload, branchId || 1);
+      } catch (eIngress) {
+        // Producto RETIRADO de esta sucursal: nunca se reactiva sin una confirmación explícita.
+        if (eIngress.code !== 'PRODUCT_RETIRED_IN_BRANCH') throw eIngress;
+        setLoading(false);
+        const confirmed = await confirmAction(
+          'Producto retirado de la sucursal',
+          `${eIngress.message}\n\nSi confirmás, se registra el ingreso y "${prodName.trim()}" vuelve a estar disponible para la venta en ${branchName}.`,
+          'Reactivar e ingresar'
+        );
+        if (!confirmed) {
+          alert('Ingreso cancelado. No se registró nada.');
+          return;
+        }
+        setLoading(true);
+        await createIngress({ ...ingressPayload, reactivate_branch_product: true }, branchId || 1);
+      }
       // La presentación visual es solo un dato de cartelería: se actualiza después del ingreso y
       // si falla no afecta el ingreso ya registrado.
       let visualWarning = '';
@@ -3221,10 +3307,10 @@ return (
 
             {/* ADMINISTRACIÓN DE PRECIOS Y STOCK MÍNIMO POR SUCURSAL */}
             <View style={styles.card}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#333' }}>⚙️ Administración por Sucursal ({branchName})</Text>
-                <TouchableOpacity style={{ backgroundColor: '#007bff', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 }} onPress={loadBranchAdminProducts}>
-                  <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 11 }}>↻ Cargar Catálogo Sucursal</Text>
+              <View style={[{ marginBottom: 10 }, isNarrowScreen ? { flexDirection: 'column' } : { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
+                <Text style={[{ fontSize: 15, fontWeight: 'bold', color: '#333' }, !isNarrowScreen && { flexShrink: 1, marginRight: 8 }]}>⚙️ Administración por Sucursal ({branchName})</Text>
+                <TouchableOpacity style={[{ backgroundColor: '#007bff', paddingHorizontal: 10, paddingVertical: isNarrowScreen ? 10 : 6, borderRadius: 6, alignItems: 'center' }, isNarrowScreen && { marginTop: 8, alignSelf: 'stretch' }]} onPress={loadBranchAdminProducts}>
+                  <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: isNarrowScreen ? 13 : 11 }}>↻ Cargar Catálogo Sucursal</Text>
                 </TouchableOpacity>
               </View>
 
@@ -3238,9 +3324,27 @@ return (
                     .filter(item => (item.name || '').toLowerCase().includes(branchAdminSearch.toLowerCase()))
                     .map(item => {
                       const unitLabel = item.unit_type === 'kg' ? 'kg' : 'unid';
+                      const branchStatus = item.branch_status || (item.is_available ? 'DISPONIBLE' : 'RETIRADO');
+                      const isRetired = branchStatus === 'RETIRADO';
+                      const isNotEnabled = branchStatus === 'NO_HABILITADO';
                       return (
-                        <View key={item.product_id} style={{ padding: 10, backgroundColor: '#f8f9fa', borderRadius: 8, marginBottom: 10, borderWidth: 1, borderColor: '#dee2e6' }}>
-                          <Text style={{ fontWeight: 'bold', fontSize: 14, color: '#222' }}>{item.name}</Text>
+                        <View key={item.product_id} style={{ padding: 10, backgroundColor: isRetired ? '#fff5f5' : '#f8f9fa', borderRadius: 8, marginBottom: 10, borderWidth: 1, borderColor: isRetired ? '#f5c2c7' : '#dee2e6' }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+                            <Text style={{ fontWeight: 'bold', fontSize: 14, color: '#222', flexShrink: 1, marginRight: 6 }}>{item.name}</Text>
+                            {isRetired && (
+                              <View style={{ backgroundColor: '#dc3545', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                                <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>RETIRADO</Text>
+                              </View>
+                            )}
+                            {isNotEnabled && (
+                              <View style={{ backgroundColor: '#6c757d', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                                <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>NO HABILITADO</Text>
+                              </View>
+                            )}
+                          </View>
+                          {isRetired && (
+                            <Text style={{ fontSize: 11, color: '#842029', marginTop: 2 }}>No se vende ni aparece en Caja ni Cartelería de {branchName} hasta reactivarlo.</Text>
+                          )}
                           <Text style={{ fontSize: 11, color: '#555', marginBottom: 6 }}>Precio base (global): {formatMoney(item.base_price)} · Stock actual: {item.stock} {unitLabel}</Text>
 
                           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -3271,9 +3375,19 @@ return (
                             <TouchableOpacity style={[styles.buttonPrimary, { flex: 0.48, marginTop: 0, backgroundColor: '#28a745' }]} onPress={() => saveBranchProductConfig(item)} disabled={loading}>
                               <Text style={styles.buttonText}>💾 Guardar</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity style={[styles.buttonDanger, { flex: 0.48 }]} onPress={() => disableBranchProduct(item)} disabled={loading}>
-                              <Text style={styles.buttonText}>Retirar de sucursal</Text>
-                            </TouchableOpacity>
+                            {isRetired ? (
+                              <TouchableOpacity style={[styles.buttonPrimary, { flex: 0.48, marginTop: 0, backgroundColor: '#17a2b8' }]} onPress={() => reactivateProductInBranch(item)} disabled={loading}>
+                                <Text style={styles.buttonText}>Reactivar</Text>
+                              </TouchableOpacity>
+                            ) : isNotEnabled ? (
+                              <View style={{ flex: 0.48, justifyContent: 'center' }}>
+                                <Text style={{ fontSize: 11, color: '#6c757d', textAlign: 'center' }}>Sin habilitar en esta sucursal</Text>
+                              </View>
+                            ) : (
+                              <TouchableOpacity style={[styles.buttonDanger, { flex: 0.48 }]} onPress={() => disableBranchProduct(item)} disabled={loading}>
+                                <Text style={styles.buttonText}>Retirar de sucursal</Text>
+                              </TouchableOpacity>
+                            )}
                           </View>
 
                           {(canEditRecords || isAdminLevel) && stockEditForm?.product_id !== item.product_id && (

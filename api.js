@@ -286,7 +286,7 @@ export const createProductMaster = async (data, branchId = 1) => {
 };
 export const createIngress = async (data, branchId = 1) => {
   const res = await fetch(`${API_URL}/ingresses?branch_id=${branchId}`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});
-  if (!res.ok) throw new Error(await getApiErrorMessage(res, "Error registrando ingreso"));
+  if (!res.ok) throw await buildApiError(res, "Error registrando ingreso");
   return await res.json();
 };
 export const fetchIngresses = async (productId=null, branchId=1) => {
@@ -506,15 +506,45 @@ export const configureBranchProduct = async (branchId, productId, data) => {
   return await res.json();
 };
 
-export const removeBranchProduct = async (branchId, productId) => {
-  const res = await fetch(`${API_URL}/branches/${branchId}/products/${productId}`, {
+// Error con el código del header X-Error-Code (p. ej. RETIRE_REQUIRES_CONFIRMATION) y el status HTTP,
+// para que la pantalla pueda pedir confirmación en lugar de solo mostrar el mensaje.
+const buildApiError = async (res, fallback) => {
+  const error = new Error(await getApiErrorMessage(res, fallback));
+  error.status = res.status;
+  error.code = res.headers?.get?.("X-Error-Code") || null;
+  return error;
+};
+
+export const fetchRetirePreview = async (branchId, productId) => {
+  const res = await fetch(`${API_URL}/branches/${branchId}/products/${productId}/retire-preview`);
+  if (!res.ok) throw await buildApiError(res, "Error consultando el stock del producto en la sucursal");
+  return await res.json();
+};
+
+export const removeBranchProduct = async (branchId, productId, options = {}) => {
+  const q = new URLSearchParams();
+  if (options.confirmStock) q.set("confirm_stock", "true");
+  if (options.actor) q.set("actor", options.actor);
+  if (options.reason) q.set("reason", options.reason);
+  const query = q.toString();
+  const res = await fetch(`${API_URL}/branches/${branchId}/products/${productId}${query ? `?${query}` : ""}`, {
     method: "DELETE",
   });
 
   if (!res.ok) {
-    throw new Error(await getApiErrorMessage(res, "Error retirando producto de sucursal"));
+    throw await buildApiError(res, "Error retirando producto de sucursal");
   }
 
+  return await res.json();
+};
+
+export const reactivateBranchProduct = async (branchId, productId, actor = null, reason = null) => {
+  const res = await fetch(`${API_URL}/branches/${branchId}/products/${productId}/reactivate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actor, reason }),
+  });
+  if (!res.ok) throw await buildApiError(res, "Error reactivando producto en la sucursal");
   return await res.json();
 };
 
